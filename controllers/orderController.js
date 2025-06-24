@@ -19,10 +19,10 @@ const createOrder = asyncHandler(async (req, res) => {
     let initialTotal = 0;
 
     for (const item of items) {
-        const dish = await Dish.findById(item.dishId);
+        const dish = await Dish.findById(item.dish);
         if (!dish || !dish.isAvailable) {
             res.status(404);
-            throw new Error(`Dish not found or unavailable: ${item.dishId}`);
+            throw new Error(`Dish not found or unavailable: ${item.dish}`);
         }
         orderItems.push({
             dish: dish._id,
