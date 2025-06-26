@@ -7,18 +7,43 @@ const Dish = require('../models/Dish'); // To get dish price
 // @route   POST /api/orders
 // @access  Private/Waiter
 const createOrder = asyncHandler(async (req, res) => {
-    const { tableNumber, items } = req.body; // items: [{ dishId: '...', quantity: N }]
+    // --- UPDATED: Destructure tableNumber, customerName, customerPhoneNumber ---
+    const { items, tableNumber, customerName, customerPhoneNumber } = req.body;
 
+    // 1. Basic input validation
+    if (!tableNumber) {
+        res.status(400);
+        throw new Error('Table number is required to create an order.');
+    }
     if (!items || items.length === 0) {
         res.status(400);
-        throw new Error('No order items provided');
+        throw new Error('No order items provided.');
     }
+    // --- NEW VALIDATION: customerName and customerPhoneNumber ---
+    if (!customerName) {
+        res.status(400);
+        throw new Error('Customer name is required for the order.');
+    }
+    if (!customerPhoneNumber) {
+        res.status(400);
+        throw new Error('Customer phone number is required.');
+    }
+    // Note: Mongoose schema handles specific format validation for customerPhoneNumber.
 
-    // Validate dishes and get their prices for initial total (might change after chef accepts)
     const orderItems = [];
     let initialTotal = 0;
 
+    // 2. Validate each item and fetch dish details
     for (const item of items) {
+        if (!item.dish || !item.quantity) {
+            res.status(400);
+            throw new Error('Each order item must specify a dish ID and quantity.');
+        }
+        if (typeof item.quantity !== 'number' || item.quantity <= 0) {
+            res.status(400);
+            throw new Error('Item quantity must be a positive number.');
+        }
+
         const dish = await Dish.findById(item.dish);
         if (!dish || !dish.isAvailable) {
             res.status(404);
@@ -32,19 +57,31 @@ const createOrder = asyncHandler(async (req, res) => {
         initialTotal += dish.price * item.quantity;
     }
 
+    // 3. Create the order document
     const order = new Order({
         tableNumber,
+        customerName,        // --- NEW: Save customerName ---
+        customerPhoneNumber, // --- NEW: Save customerPhoneNumber ---
         waiter: req.user._id, // The logged-in waiter
         items: orderItems,
-        totalAmount: initialTotal, // This will be recalculated when billed
+        totalAmount: initialTotal, // This will be recalculated by pre-save hook
         orderStatus: 'pending'
     });
 
-    const createdOrder = await order.save();
-    res.status(201).json(createdOrder);
+    const createdOrder = await order.save(); // The pre-save hook on Order model will run here
+
+    // 4. Respond with the created order, populating dish details for the client
+    const populatedOrder = await Order.findById(createdOrder._id)
+                                    .populate({
+                                        path: 'items.dish',
+                                        select: 'name price description category'
+                                    })
+                                    .populate('waiter', 'name email');
+
+    res.status(201).json(populatedOrder);
 });
 
-// @desc    Get all orders (for Admin, Chef)
+// @desc    Get all orders (for Admin, Chef, Waiter)
 // @route   GET /api/orders
 // @access  Private/Admin, Chef (and potentially Waiter for their own orders)
 const getOrders = asyncHandler(async (req, res) => {
@@ -171,7 +208,6 @@ const cancelOrder = asyncHandler(async (req, res) => {
         throw new Error('Order not found');
     }
 });
-
 
 module.exports = {
     createOrder,
