@@ -22,10 +22,7 @@ const app = express();
 // Middleware
 app.use(express.json()); // Body parser for JSON requests
 
-// Basic route for testing
-app.get('/', (req, res) => {
-    res.send('Restaurant Management System API is running!');
-});
+
 
 // Use routes
 app.use('/api/auth', authRoutes);
