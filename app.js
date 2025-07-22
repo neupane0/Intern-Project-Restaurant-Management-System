@@ -12,6 +12,7 @@ const userRoutes = require('./routes/userRoutes');
 const dishRoutes = require('./routes/dishRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const billRoutes = require('./routes/billRoutes');
+const reservationRoutes = require('./routes/reservationRoutes');
 
 // Load environment variables
 dotenv.config();
@@ -37,6 +38,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin/users', userRoutes); // User management is admin-specific
 app.use('/api/dishes', dishRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/reservation', reservationRoutes);
 app.use('/api/bills', billRoutes); // Billing and Reports
 
 // Error Handling Middleware (must be after all routes)
