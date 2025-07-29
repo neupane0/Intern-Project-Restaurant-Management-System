@@ -3,6 +3,12 @@ const express = require('express');
 const router = express.Router();
 const { registerUser, authUser, forgotPassword, resetPassword } = require('../controllers/authController'); // Make sure all functions are imported
 
+const { protect, authorizeRoles } = require('../middleware/authMiddleware');
+
+// // Only admin with token can register users
+// router.post('/register', protect, authorizeRoles('admin'), registerUser);
+
+
 // Public route for user registration
 router.post('/register', registerUser);
 

@@ -11,6 +11,13 @@ const crypto = require('crypto');
 // @access  Public (Can be protected by Admin role after initial setup)
 const registerUser = asyncHandler(async (req, res) => {
   const { name, email, password, role } = req.body;
+  
+
+  //  It help to allow only admin to register through the public route...
+  if (role !== 'admin') {
+    res.status(403);
+    throw new Error('Only admin self-registration is allowed from this endpoint');
+  }
 
   const userExists = await User.findOne({ email });
 
