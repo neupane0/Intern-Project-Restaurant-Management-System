@@ -12,8 +12,8 @@ const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
 // Admin routes for managing users
 router.route('/')
-    // .post(registerUser)
-    .post(protect, authorizeRoles('admin'), registerUser)
+    .post(registerUser)
+    // .post(protect, authorizeRoles('admin'), registerUser)
     .get(protect, authorizeRoles('admin'), getUsers);
 
 router.route('/:id')
