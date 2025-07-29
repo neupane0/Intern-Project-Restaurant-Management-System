@@ -60,11 +60,11 @@ const createOrder = asyncHandler(async (req, res) => {
     // 3. Create the order document
     const order = new Order({
         tableNumber,
-        customerName,        // --- NEW: Save customerName ---
-        customerPhoneNumber, // --- NEW: Save customerPhoneNumber ---
-        waiter: req.user._id, // The logged-in waiter
+        customerName,        
+        customerPhoneNumber, 
+        waiter: req.user._id,
         items: orderItems,
-        totalAmount: initialTotal, // This will be recalculated by pre-save hook
+        totalAmount: initialTotal, 
         orderStatus: 'pending'
     });
 
