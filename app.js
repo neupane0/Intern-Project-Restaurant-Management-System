@@ -38,8 +38,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin/users', userRoutes); // User management is admin-specific
 app.use('/api/dishes', dishRoutes);
 app.use('/api/orders', orderRoutes);
-app.use('/api/reservation', reservationRoutes);
 app.use('/api/bills', billRoutes); // Billing and Reports
+app.use('/api/reservations', reservationRoutes);
+
 
 // Error Handling Middleware (must be after all routes)
 app.use(notFound);
