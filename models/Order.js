@@ -1,70 +1,126 @@
 // models/Order.js
 const mongoose = require("mongoose");
+const Dish = require("./Dish"); // Import Dish model to get price for calculation
 
+// Sub-schema for individual items within an order
 const orderItemSchema = new mongoose.Schema({
-  dish: { type: mongoose.Schema.Types.ObjectId, ref: "Dish", required: true },
-  quantity: { type: Number, required: true, min: 1 },
+  dish: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Dish",
+    required: true,
+  },
+  quantity: {
+    type: Number,
+    required: true,
+    min: [1, "Quantity must be at least 1"],
+  },
+  // Status for individual item in the kitchen workflow
   status: {
     type: String,
-    enum: ["pending", "accepted", "declined"],
+    //  Added 'cancellation_requested' to enum
+    enum: [
+      "pending",
+      "accepted",
+      "declined",
+      "preparing",
+      "ready",
+      "cancelled",
+      "cancellation_requested",
+    ],
     default: "pending",
   },
   notes: {
-    // <--- NEW: Special requests or notes for this specific dish item
+    // Special requests or notes for this specific dish item
     type: String,
     trim: true,
     default: "",
   },
 });
 
-const orderSchema = new mongoose.Schema({
-  tableNumber: { type: String, required: true },
-  waiter: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  items: [orderItemSchema], // Array of dishes in the order
-  orderStatus: {
-    type: String,
-    enum: ["pending", "preparing", "ready", "completed", "cancelled"],
-    default: "pending",
+// Main Order Schema
+const orderSchema = new mongoose.Schema(
+  {
+    tableNumber: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    waiter: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    items: [orderItemSchema], // Array of sub-documents
+    orderStatus: {
+      // Overall order status
+      type: String,
+      enum: ["pending", "preparing", "ready", "completed", "cancelled"],
+      default: "pending",
+    },
+    totalAmount: {
+      // Calculated based on accepted/non-cancelled items
+      type: Number,
+      required: true,
+      default: 0,
+      min: [0, "Total amount cannot be negative"],
+    },
+    customerName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    customerPhoneNumber: {
+      type: String,
+      required: true,
+      trim: true,
+      match: [
+        /^\+[1-9]\d{1,14}$/,
+        "Please enter a valid phone number in E.164 format (e.g., +1234567890)",
+      ],
+    },
+    isBilled: {
+      // Flag to indicate if a bill has been generated for this order
+      type: Boolean,
+      default: false,
+    },
   },
-  totalAmount: { type: Number, default: 0 },
-  orderDate: { type: Date, default: Date.now },
-  isBilled: { type: Boolean, default: false },
-  // --- NEW FIELD: Customer Phone Number ---
-  customerPhoneNumber: {
-    type: String,
-    required: true, // Making it required for WhatsApp feature
-    // Basic regex for phone numbers (adjust as per country codes/format needed)
-    match: [
-      /^\+[1-9]\d{1,14}$/,
-      "Please enter a valid phone number in E.164 format (e.g., +1234567890)",
-    ],
-  },
-});
+  {
+    timestamps: true, // Adds createdAt and updatedAt fields
+  }
+);
 
-// Pre-save hook to calculate totalAmount before saving the order
+// Pre-save hook to calculate totalAmount based on accepted and non-cancelled items
 orderSchema.pre("save", async function (next) {
-  if (
-    this.isModified("items") ||
-    this.isNew ||
-    this.isModified("orderStatus")
-  ) {
-    await this.populate("items.dish");
-    this.totalAmount = this.items.reduce((acc, orderItem) => {
+  let calculatedTotal = 0;
+  const order = this; // 'this' refers to the current order document
+
+  // Only calculate if items array is modified or it's a new order
+  if (order.isModified("items") || order.isNew) {
+    // Populate the 'dish' field within 'items' to get access to dish prices
+    await order.populate("items.dish");
+
+    for (const item of order.items) {
+      // Only include items that are 'accepted' AND NOT 'cancelled' AND NOT 'cancellation_requested'
       if (
-        orderItem.dish &&
-        typeof orderItem.dish.price === "number" &&
-        orderItem.status === "accepted"
+        item.status === "accepted" &&
+        item.status !== "cancelled" &&
+        item.status !== "cancellation_requested"
       ) {
-        return acc + orderItem.quantity * orderItem.dish.price;
+        const dish = item.dish; // Already populated
+        if (dish && typeof dish.price === "number") {
+          calculatedTotal += dish.price * item.quantity;
+        } else {
+          console.warn(
+            `Dish with ID ${
+              item.dish ? item.dish._id : "N/A"
+            } or its price not found for order item. Skipping calculation.`
+          );
+        }
       }
-      console.warn(
-        `Warning: Dish with ID ${
-          orderItem.dish ? orderItem.dish._id : "N/A"
-        } or its price not found/accepted for order item.`
-      );
-      return acc;
-    }, 0);
-    this.depopulate("items.dish");
+    }
+    order.totalAmount = calculatedTotal;
+    // After calculation, depopulate to prevent sending full dish objects in saved order
+    order.depopulate("items.dish");
   }
   next();
 });

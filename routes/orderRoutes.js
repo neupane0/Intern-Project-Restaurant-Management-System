@@ -1,31 +1,45 @@
 // routes/orderRoutes.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 const {
-    createOrder,
-    getOrders,
-    getOrderById,
-    updateOrderItemStatus,
-    updateOrderStatus,
-    cancelOrder
-} = require('../controllers/orderController');
-const { protect, authorizeRoles } = require('../middleware/authMiddleware');
+  createOrder,
+  getOrders,
+  getOrderById,
+  updateOrderItemStatus,
+  updateOrderStatus,
+  cancelOrder,
+  requestItemCancellation, // Import the new function
+} = require("../controllers/orderController");
+const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 
-router.route('/')
-    .post(protect, authorizeRoles('waiter'), createOrder)
-    .get(protect, authorizeRoles('admin', 'chef', 'waiter'), getOrders); // Waiter can only see their own orders based on controller logic
+// Base routes for orders
+router
+  .route("/")
+  .post(protect, authorizeRoles("waiter", "admin"), createOrder) // Waiter or Admin can create orders
+  .get(protect, authorizeRoles("admin", "chef", "waiter"), getOrders); // Admin sees all, Chef sees kitchen relevant, Waiter sees own
 
-router.route('/:id')
-    .get(protect, authorizeRoles('admin', 'chef', 'waiter'), getOrderById);
+// Routes for specific order by ID
+router
+  .route("/:id")
+  .get(protect, authorizeRoles("admin", "chef", "waiter"), getOrderById) // Get single order
+  .put(protect, authorizeRoles("admin", "chef"), updateOrderStatus) // Update overall order status
+  .put(protect, authorizeRoles("waiter", "admin"), cancelOrder); // Cancel entire order (Waiters can only cancel their own)
 
-// Chef specific routes for order items
-router.put('/:orderId/item/:itemId/status', protect, authorizeRoles('chef'), updateOrderItemStatus);
+// Route to update individual order item status (for chef)
+router.put(
+  "/:orderId/item/:itemId/status",
+  protect,
+  authorizeRoles("chef"),
+  updateOrderItemStatus
+);
 
-// Chef/Admin update overall order status
-router.put('/:id/status', protect, authorizeRoles('chef', 'admin'), updateOrderStatus);
-
-// Waiter/Admin cancel order
-router.put('/:id/cancel', protect, authorizeRoles('waiter', 'admin'), cancelOrder);
-
+// Request cancellation for an individual order item ---
+// PUT /api/orders/:orderId/item/:itemId/request-cancellation
+router.put(
+  "/:orderId/item/:itemId/request-cancellation",
+  protect,
+  authorizeRoles("waiter", "admin"),
+  requestItemCancellation
+);
 
 module.exports = router;
