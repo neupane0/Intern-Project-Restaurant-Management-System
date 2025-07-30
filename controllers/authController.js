@@ -122,6 +122,10 @@ const forgotPassword = asyncHandler(async (req, res) => {
   }
 });
 
+
+// This route handles final password reset after clicking the email link.
+// It validates the token, ensures expiry time hasn't passed, and updates the user's password.
+
 // @desc    Reset Password - Set new password
 // @route   PUT /api/auth/resetpassword/:resettoken
 // @access  Public
