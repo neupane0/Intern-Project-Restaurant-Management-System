@@ -1,15 +1,16 @@
 // controllers/dishController.js
 const asyncHandler = require('express-async-handler');
 const Dish = require('../models/Dish');
-const path = require('path'); // Needed if you plan to delete files later, but good to have.
-const fs = require('fs'); // Needed if you plan to delete files later.
+const path = require('path');
+const fs = require('fs');
 
 
 // @desc    Create a new dish
 // @route   POST /api/dishes
 // @access  Private (Admin/Chef)
 const createDish = asyncHandler(async (req, res) => {
-    const { name, description, price, category, isAvailable } = req.body;
+    // --- UPDATED: Destructure dietaryRestrictions ---
+    const { name, description, price, category, isAvailable, dietaryRestrictions } = req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : '';
 
     if (!name || !price) {
@@ -42,6 +43,13 @@ const createDish = asyncHandler(async (req, res) => {
         throw new Error(`Dish with name "${name}" already exists.`);
     }
 
+    // --- NEW: Validate dietaryRestrictions if provided ---
+    if (dietaryRestrictions && !Array.isArray(dietaryRestrictions)) {
+        res.status(400);
+        throw new Error('Dietary restrictions must be an array.');
+    }
+    // Mongoose schema enum will handle validation of individual items in the array
+
     const dish = await Dish.create({
         name,
         description,
@@ -49,6 +57,7 @@ const createDish = asyncHandler(async (req, res) => {
         category,
         isAvailable,
         imageUrl,
+        dietaryRestrictions: dietaryRestrictions || [], // --- NEW: Save dietaryRestrictions ---
     });
 
     res.status(201).json(dish);
@@ -80,7 +89,8 @@ const getDishById = asyncHandler(async (req, res) => {
 // @route   PUT /api/dishes/:id
 // @access  Private (Admin/Chef)
 const updateDish = asyncHandler(async (req, res) => {
-    const { name, description, price, category, isAvailable } = req.body;
+    // --- UPDATED: Destructure dietaryRestrictions ---
+    const { name, description, price, category, isAvailable, dietaryRestrictions } = req.body;
     let newImageUrl = req.file ? `/uploads/${req.file.filename}` : (req.body.imageUrl || '');
 
     const dish = await Dish.findById(req.params.id);
@@ -99,6 +109,15 @@ const updateDish = asyncHandler(async (req, res) => {
         dish.category = category !== undefined ? category : dish.category;
         dish.isAvailable = isAvailable !== undefined ? isAvailable : dish.isAvailable;
         dish.imageUrl = newImageUrl;
+        // --- NEW: Update dietaryRestrictions ---
+        if (dietaryRestrictions !== undefined) {
+             if (!Array.isArray(dietaryRestrictions)) {
+                res.status(400);
+                throw new Error('Dietary restrictions must be an array.');
+            }
+            dish.dietaryRestrictions = dietaryRestrictions;
+        }
+
 
         if (updatedName !== dish.name) {
             const dishExists = await Dish.findOne({ name: updatedName });
@@ -180,3 +199,7 @@ module.exports = {
     deleteDish,
     toggleDishAvailability,
 };
+
+
+
+
