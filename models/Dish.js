@@ -28,7 +28,7 @@ const dishSchema = mongoose.Schema(
             type: Boolean,
             default: true,
         },
-        
+        //  Dietary Restrictions 
         dietaryRestrictions: {
             type: [String], 
             default: [],    

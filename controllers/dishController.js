@@ -9,7 +9,7 @@ const fs = require('fs');
 // @route   POST /api/dishes
 // @access  Private (Admin/Chef)
 const createDish = asyncHandler(async (req, res) => {
-    // --- UPDATED: Destructure dietaryRestrictions ---
+    // Destructure dietaryRestrictions 
     const { name, description, price, category, isAvailable, dietaryRestrictions } = req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : '';
 
@@ -43,7 +43,7 @@ const createDish = asyncHandler(async (req, res) => {
         throw new Error(`Dish with name "${name}" already exists.`);
     }
 
-    // --- NEW: Validate dietaryRestrictions if provided ---
+    // Validate dietaryRestrictions if provided 
     if (dietaryRestrictions && !Array.isArray(dietaryRestrictions)) {
         res.status(400);
         throw new Error('Dietary restrictions must be an array.');
@@ -57,7 +57,7 @@ const createDish = asyncHandler(async (req, res) => {
         category,
         isAvailable,
         imageUrl,
-        dietaryRestrictions: dietaryRestrictions || [], // --- NEW: Save dietaryRestrictions ---
+        dietaryRestrictions: dietaryRestrictions || [], //  Save dietaryRestrictions 
     });
 
     res.status(201).json(dish);
@@ -89,7 +89,7 @@ const getDishById = asyncHandler(async (req, res) => {
 // @route   PUT /api/dishes/:id
 // @access  Private (Admin/Chef)
 const updateDish = asyncHandler(async (req, res) => {
-    // --- UPDATED: Destructure dietaryRestrictions ---
+    //  Destructure dietaryRestrictions 
     const { name, description, price, category, isAvailable, dietaryRestrictions } = req.body;
     let newImageUrl = req.file ? `/uploads/${req.file.filename}` : (req.body.imageUrl || '');
 
@@ -109,7 +109,7 @@ const updateDish = asyncHandler(async (req, res) => {
         dish.category = category !== undefined ? category : dish.category;
         dish.isAvailable = isAvailable !== undefined ? isAvailable : dish.isAvailable;
         dish.imageUrl = newImageUrl;
-        // --- NEW: Update dietaryRestrictions ---
+        //  Update dietaryRestrictions 
         if (dietaryRestrictions !== undefined) {
              if (!Array.isArray(dietaryRestrictions)) {
                 res.status(400);
