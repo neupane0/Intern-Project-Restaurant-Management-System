@@ -179,6 +179,10 @@ const crypto = require('crypto');
 // @desc    Register a new user
 // @route   POST /api/auth/register
 // @access  Public (Can be protected by Admin role after initial setup)
+
+
+// Controller to register a new user
+// It checks if the email already exists, hashes the password, and saves the new user to the DB
 const registerUser = asyncHandler(async (req, res) => {
   const { name, email, password, role } = req.body;
 
@@ -195,6 +199,8 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new Error('User already exists');
   }
 
+  // Create a new user with the provided details
+  // The password will be hashed by the User model's pre-save hook
   const user = await User.create({
     name,
     email,
@@ -202,6 +208,8 @@ const registerUser = asyncHandler(async (req, res) => {
     role,
   });
 
+  // If user creation is successful, respond with user details and a JWT token
+  // The token is generated using the user's ID
   if (user) {
     res.status(201).json({
       success: true,
