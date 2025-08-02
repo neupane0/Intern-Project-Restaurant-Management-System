@@ -1,9 +1,7 @@
 // controllers/orderController.js
-const asyncHandler = require('express-async-handler');
-const Order = require('../models/Order');
-const Dish = require('../models/Dish');
-const { sendWhatsAppMessage } = require('../utils/whatsappService'); // NEW: Import WhatsApp service
-const User = require('../models/User'); // NEW: Import User model to get admin name for message
+const asyncHandler = require("express-async-handler");
+const Order = require("../models/Order");
+const Dish = require("../models/Dish"); // To get dish price
 
 // @desc    Create a new order
 // @route   POST /api/orders
@@ -36,20 +34,26 @@ const createOrder = asyncHandler(async (req, res) => {
         });
     }
 
-    const order = await Order.create({
-        tableNumber,
-        waiter: req.user._id, // The authenticated user (waiter or admin)
-        customerName,
-        customerPhoneNumber,
-        items: orderItems,
-        orderStatus: 'pending',
-        // totalAmount will be calculated by the pre-save hook in the Order model
-    });
+  // 3. Create the order document
+  const order = new Order({
+    tableNumber,
+    customerName, // --- NEW: Save customerName ---
+    customerPhoneNumber, // --- NEW: Save customerPhoneNumber ---
+    waiter: req.user._id, // The logged-in waiter
+    items: orderItems,
+    totalAmount: initialTotal, // This will be recalculated by pre-save hook
+    orderStatus: "pending",
+  });
 
-    // Populate dish details for the response
-    const populatedOrder = await Order.findById(order._id)
-        .populate('waiter', 'name email')
-        .populate('items.dish', 'name price');
+  const createdOrder = await order.save(); // The pre-save hook on Order model will run here
+
+  // 4. Respond with the created order, populating dish details for the client
+  const populatedOrder = await Order.findById(createdOrder._id)
+    .populate({
+      path: "items.dish",
+      select: "name price description category",
+    })
+    .populate("waiter", "name email");
 
     res.status(201).json(populatedOrder);
 });
@@ -365,12 +369,10 @@ const manageItemCancellation = asyncHandler(async (req, res) => {
 
 
 module.exports = {
-    createOrder,
-    getOrders,
-    getOrderById,
-    updateOrderItemStatus,
-    updateOrderStatus,
-    cancelOrder,
-    requestItemCancellation,
-    manageItemCancellation, // --- NEW: Export the new function ---
+  createOrder,
+  getOrders,
+  getOrderById,
+  updateOrderItemStatus,
+  updateOrderStatus,
+  cancelOrder,
 };

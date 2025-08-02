@@ -7,9 +7,7 @@ const {
     getOrderById,
     updateOrderItemStatus,
     updateOrderStatus,
-    cancelOrder,
-    requestItemCancellation,
-    manageItemCancellation, // --- NEW: Import the new function ---
+    cancelOrder
 } = require('../controllers/orderController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
@@ -30,9 +28,8 @@ router.put('/:orderId/item/:itemId/status', protect, authorizeRoles('chef'), upd
 // Route to request cancellation for an individual order item (by Waiter)
 router.put('/:orderId/item/:itemId/request-cancellation', protect, authorizeRoles('waiter', 'admin'), requestItemCancellation);
 
-// --- NEW ROUTE: Admin manages (approves/rejects) item cancellation requests ---
-// PUT /api/orders/:orderId/item/:itemId/manage-cancellation
-router.put('/:orderId/item/:itemId/manage-cancellation', protect, authorizeRoles('admin'), manageItemCancellation);
+// Waiter/Admin cancel order
+router.put('/:id/cancel', protect, authorizeRoles('waiter', 'admin'), cancelOrder);
 
 
 module.exports = router;
