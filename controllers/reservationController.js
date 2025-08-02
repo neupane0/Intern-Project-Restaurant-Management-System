@@ -1,10 +1,18 @@
 // controllers/reservationController.js
 const asyncHandler = require('express-async-handler');
 const Reservation = require('../models/Reservation');
+const { sendWhatsAppMessage } = require('../utils/whatsappService'); // NEW: Import WhatsApp service
+const User = require('../models/User'); // NEW: Import User model to get admin/user name for message
+
+// --- Hardcoded list of all tables in the restaurant ---
+// In a more complex system, you would have a 'Table' model in the database.
+const ALL_TABLE_NUMBERS = ['T-1', 'T-2', 'T-3', 'T-4', 'T-5', 'T-6', 'T-7', 'T-8', 'T-9', 'T-10'];
+// You could also add capacities here: e.g., { number: 'T-1', capacity: 4 }
+
 
 // @desc    Create a new table reservation
 // @route   POST /api/reservations
-// @access  Private/Admin
+// @access  Private/Admin, Waiter, User (Customer)
 const createReservation = asyncHandler(async (req, res) => {
     const { tableNumber, customerName, customerPhoneNumber, numberOfGuests, reservationTime, notes } = req.body;
 
@@ -12,6 +20,12 @@ const createReservation = asyncHandler(async (req, res) => {
     if (!tableNumber || !customerName || !customerPhoneNumber || !numberOfGuests || !reservationTime) {
         res.status(400);
         throw new Error('Please fill all required reservation fields: table number, customer name, phone number, number of guests, and reservation time.');
+    }
+
+    // Validate tableNumber against our known list (optional, but good for consistency)
+    if (!ALL_TABLE_NUMBERS.includes(tableNumber)) {
+        res.status(400);
+        throw new Error(`Invalid table number: ${tableNumber}. Please choose from ${ALL_TABLE_NUMBERS.join(', ')}.`);
     }
 
     // Validate number of guests
@@ -24,22 +38,28 @@ const createReservation = asyncHandler(async (req, res) => {
     const parsedReservationTime = new Date(reservationTime);
     if (isNaN(parsedReservationTime.getTime())) {
         res.status(400);
-        throw new Error('Invalid reservation time format. Please provide a valid date/time.');
+        throw new Error('Invalid reservation time format. Please provide a valid date/time (e.g., ISO 8601).');
     }
 
-   
+    // Define a time window for conflict checking (e.g., 2 hours before and 2 hours after the requested time)
+    // This prevents booking the same table for overlapping reservations.
+    const conflictWindowStart = new Date(parsedReservationTime.getTime() - (2 * 60 * 60 * 1000)); // 2 hours before
+    const conflictWindowEnd = new Date(parsedReservationTime.getTime() + (2 * 60 * 60 * 1000));   // 2 hours after
+
+    // Check for existing reservations for this table within the time window
     const existingReservation = await Reservation.findOne({
         tableNumber,
-        reservationTime: parsedReservationTime,
-        
+        reservationTime: {
+            $gte: conflictWindowStart,
+            $lte: conflictWindowEnd
+        },
         status: { $in: ['pending', 'confirmed', 'seated'] } // Only check active reservations
     });
 
     if (existingReservation) {
         res.status(409); // Conflict
-        throw new Error(`Table ${tableNumber} is already reserved at ${parsedReservationTime.toLocaleString()}.`);
+        throw new Error(`Table ${tableNumber} is already reserved or unavailable around ${parsedReservationTime.toLocaleTimeString()} on ${parsedReservationTime.toLocaleDateString()}.`);
     }
-
 
     const reservation = await Reservation.create({
         tableNumber,
@@ -48,7 +68,7 @@ const createReservation = asyncHandler(async (req, res) => {
         numberOfGuests,
         reservationTime: parsedReservationTime, // Use the parsed Date object
         notes,
-        reservedBy: req.user._id, // The admin user making the reservation
+        reservedBy: req.user._id, // The authenticated user (admin, waiter, or customer) making the reservation
     });
 
     res.status(201).json(reservation);
@@ -121,14 +141,24 @@ const updateReservationStatus = asyncHandler(async (req, res) => {
         throw new Error('Invalid status provided');
     }
 
-    // You might add more complex logic here, e.g., cannot confirm a cancelled reservation
-    // if (reservation.status === 'cancelled' && status !== 'cancelled') {
-    //     res.status(400);
-    //     throw new Error('Cannot change status of a cancelled reservation');
-    // }
-
+    const oldStatus = reservation.status; // Store old status for comparison
     reservation.status = status;
     const updatedReservation = await reservation.save();
+
+    // NEW: Send WhatsApp notification if status changes to 'confirmed'
+    if (updatedReservation.status === 'confirmed' && oldStatus !== 'confirmed') {
+        const adminUser = await User.findById(req.user._id).select('name'); // Get admin's name
+        const adminName = adminUser ? adminUser.name : 'Admin';
+
+        const messageBody = `Hello ${updatedReservation.customerName}!\n\n` +
+                            `Your reservation for Table ${updatedReservation.tableNumber} ` +
+                            `at ${updatedReservation.reservationTime.toLocaleString()} for ${updatedReservation.numberOfGuests} guests ` +
+                            `has been *CONFIRMED* by ${adminName}.\n\n` +
+                            `We look forward to seeing you!\n` +
+                            `Restaurant Name`; // Replace with your restaurant name
+
+        await sendWhatsAppMessage(updatedReservation.customerPhoneNumber, messageBody);
+    }
 
     res.json(updatedReservation);
 });
@@ -149,10 +179,66 @@ const deleteReservation = asyncHandler(async (req, res) => {
 });
 
 
+// @desc    Get list of available tables for a given time
+// @route   GET /api/reservations/available?reservationTime=YYYY-MM-DDTHH:MM:SSZ&numberOfGuests=N
+// @access  Public (no login required)
+const getAvailableTables = asyncHandler(async (req, res) => {
+    const { reservationTime, numberOfGuests } = req.query;
+
+    if (!reservationTime) {
+        res.status(400);
+        throw new Error('Reservation time is required to check availability.');
+    }
+
+    const parsedReservationTime = new Date(reservationTime);
+    if (isNaN(parsedReservationTime.getTime())) {
+        res.status(400);
+        throw new Error('Invalid reservation time format. Please provide a valid date/time (e.g., ISO 8601).');
+    }
+
+    // Define the time window for checking conflicts (e.g., 2 hours before and 2 hours after)
+    const conflictWindowStart = new Date(parsedReservationTime.getTime() - (2 * 60 * 60 * 1000)); // 2 hours before
+    const conflictWindowEnd = new Date(parsedReservationTime.getTime() + (2 * 60 * 60 * 1000));   // 2 hours after
+
+    // Find all active reservations within the conflict window
+    const conflictingReservations = await Reservation.find({
+        reservationTime: {
+            $gte: conflictWindowStart,
+            $lte: conflictWindowEnd
+        },
+        status: { $in: ['pending', 'confirmed', 'seated'] }
+    });
+
+    // Get table numbers that are already reserved
+    const reservedTableNumbers = conflictingReservations.map(res => res.tableNumber);
+
+    // Filter out reserved tables from the list of all tables
+    const availableTableNumbers = ALL_TABLE_NUMBERS.filter(tableNum =>
+        !reservedTableNumbers.includes(tableNum)
+    );
+
+    // Optional: Filter by numberOfGuests if you had table capacities defined
+    // For now, we return all available tables regardless of guest count.
+    // If ALL_TABLE_NUMBERS was an array of objects with capacities:
+    // const availableTablesWithCapacity = ALL_TABLE_NUMBERS.filter(table =>
+    //     !reservedTableNumbers.includes(table.number) && table.capacity >= numberOfGuests
+    // );
+
+
+    res.json({
+        requestedTime: parsedReservationTime,
+        availableTables: availableTableNumbers,
+        // You can also return the reserved tables for debugging/info
+        // reservedTables: reservedTableNumbers
+    });
+});
+
+
 module.exports = {
     createReservation,
     getReservations,
     getReservationById,
     updateReservationStatus,
     deleteReservation,
+    getAvailableTables,
 };
