@@ -3,18 +3,17 @@ const asyncHandler = require("express-async-handler");
 const Bill = require("../models/Bill");
 const Order = require("../models/Order");
 const Dish = require("../models/Dish");
-const { sendWhatsAppMessage } = require("../utils/whatsappService"); // *** NEW: Import WhatsApp service ***
-const User = require("../models/User"); // Required for populating billedBy name
-const Report = require("../models/Report"); // *** NEW: Import the Report model ***
+const { sendWhatsAppMessage } = require("../utils/whatsappService");
+const User = require("../models/User");
+const { v4: uuidv4 } = require("uuid"); // *** NEW: Import uuid for unique identifiers ***
 
 // @desc    Generate a bill for a completed order
 // @route   POST /api/bills/:orderId
 // @access  Private/Admin
 const generateBill = asyncHandler(async (req, res) => {
-  // --- UPDATED: Populate customerPhoneNumber from Order ---
   const order = await Order.findById(req.params.orderId)
     .populate("items.dish")
-    .populate("waiter", "name"); // Also populate waiter name for bill info if needed
+    .populate("waiter", "name");
 
   if (!order) {
     res.status(404);
@@ -60,7 +59,9 @@ const generateBill = asyncHandler(async (req, res) => {
     items: billedItems,
     totalAmount: totalAmount,
     paymentStatus: "pending",
-    customerPhoneNumber: order.customerPhoneNumber, // --- NEW: Copy phone number from order to bill ---
+    customerPhoneNumber: order.customerPhoneNumber,
+    originalOrderTotal: order.totalAmount, // Store original total for reference
+    customerName: order.customerName, // Copy customer name from order
   });
 
   const createdBill = await bill.save();
@@ -72,9 +73,6 @@ const generateBill = asyncHandler(async (req, res) => {
   }
   await order.save();
 
-  // const billMessage = `Hello ${order.customerName || 'customer'}!\nYour bill for Table ${order.tableNumber} has been generated.\nTotal: Rs. ${createdBill.totalAmount.toFixed(2)}\nBill ID: ${createdBill._id}\nPayment Status: Pending`;
-  // await sendWhatsAppMessage(createdBill.customerPhoneNumber, billMessage);
-
   res.status(201).json(createdBill);
 });
 
@@ -83,7 +81,10 @@ const generateBill = asyncHandler(async (req, res) => {
 // @access  Private/Admin
 const getBills = asyncHandler(async (req, res) => {
   const bills = await Bill.find({})
-    .populate("order", "tableNumber orderStatus")
+    .populate(
+      "order",
+      "tableNumber orderStatus customerName customerPhoneNumber"
+    ) // Populate more order fields
     .populate("billedBy", "name");
   res.json(bills);
 });
@@ -93,7 +94,10 @@ const getBills = asyncHandler(async (req, res) => {
 // @access  Private/Admin
 const getBillById = asyncHandler(async (req, res) => {
   const bill = await Bill.findById(req.params.id)
-    .populate("order", "tableNumber orderStatus")
+    .populate(
+      "order",
+      "tableNumber orderStatus customerName customerPhoneNumber"
+    )
     .populate("billedBy", "name");
   if (bill) {
     res.json(bill);
@@ -107,11 +111,11 @@ const getBillById = asyncHandler(async (req, res) => {
 // @route   PUT /api/bills/:id/pay
 // @access  Private/Admin
 const updateBillPaymentStatus = asyncHandler(async (req, res) => {
-  const { paymentStatus } = req.body; // 'paid', 'refunded'
+  const { paymentStatus } = req.body;
   const bill = await Bill.findById(req.params.id).populate(
     "order",
     "tableNumber customerName"
-  ); // Populate order for customer details
+  );
   if (bill) {
     if (!["paid", "refunded"].includes(paymentStatus)) {
       res.status(400);
@@ -120,25 +124,19 @@ const updateBillPaymentStatus = asyncHandler(async (req, res) => {
 
     const oldPaymentStatus = bill.paymentStatus;
     bill.paymentStatus = paymentStatus;
-    // Populate dish names for the WhatsApp message before saving
     await bill.populate("items.dish"); // Populate actual dish documents for the message body
     const updatedBill = await bill.save();
 
-    // --- NEW: WhatsApp Notification Logic ---
-    // Trigger message only when status changes TO 'paid' from something else
     if (paymentStatus === "paid" && oldPaymentStatus !== "paid") {
-      // Re-populate billedBy to get their name for the message
       const adminUser = await User.findById(updatedBill.billedBy).select(
         "name"
       );
       const billedByName = adminUser ? adminUser.name : "Admin";
 
-      // Construct WhatsApp message
       let messageBody = `Hello ${bill.order.customerName || "customer"}!\n`;
-      messageBody += `Your order for Table ${bill.order.tableNumber} (Order ID: ${bill.order._id}) has been PAID.\n\n`;
+      messageBody += `Your bill for Table ${bill.order.tableNumber} (Order ID: ${bill.order._id}) has been PAID.\n\n`;
       messageBody += `--- Your Bill Summary ---\n`;
       updatedBill.items.forEach((item) => {
-        // Now item.dish should be populated directly here due to the await bill.populate('items.dish')
         const dishName =
           item.dish && item.dish.name ? item.dish.name : "Unknown Dish";
         messageBody += `${item.quantity}x ${dishName} @ Rs.${item.price.toFixed(
@@ -153,7 +151,6 @@ const updateBillPaymentStatus = asyncHandler(async (req, res) => {
       messageBody += `Billed by: ${billedByName}\n`;
       messageBody += `Thank you for your business!`;
 
-      // Call the WhatsApp service to send the message
       await sendWhatsAppMessage(updatedBill.customerPhoneNumber, messageBody);
     }
 
@@ -162,6 +159,188 @@ const updateBillPaymentStatus = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Bill not found");
   }
+});
+
+// @desc    Split a bill for an order into multiple sub-bills
+// @route   POST /api/bills/:orderId/split
+// @access  Private/Admin
+const splitBill = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  const { splits } = req.body; // Expected format: [{ customerName: "...", items: [{ dish: "dishId", quantity: N }] }]
+
+  if (!splits || !Array.isArray(splits) || splits.length < 2) {
+    res.status(400);
+    throw new Error(
+      "Splits array is required and must contain at least 2 split portions."
+    );
+  }
+
+  const originalOrder = await Order.findById(orderId).populate("items.dish");
+
+  if (!originalOrder) {
+    res.status(404);
+    throw new Error("Original order not found.");
+  }
+
+  if (originalOrder.isBilled) {
+    res.status(400);
+    throw new Error("This order has already been billed and cannot be split.");
+  }
+
+  // Ensure the order has accepted items to be split
+  const acceptedOrderItemsMap = new Map(); // Map<dishId.toString(), { dish: DishDoc, quantity: Number }>
+  originalOrder.items.forEach((item) => {
+    if (item.status === "accepted" && item.dish) {
+      const dishIdStr = item.dish._id.toString();
+      acceptedOrderItemsMap.set(dishIdStr, {
+        dish: item.dish, // Store the populated dish document
+        quantity:
+          (acceptedOrderItemsMap.get(dishIdStr)?.quantity || 0) + item.quantity,
+      });
+    }
+  });
+
+  if (acceptedOrderItemsMap.size === 0) {
+    res.status(400);
+    throw new Error("No accepted items in the original order to split.");
+  }
+
+  const createdBills = [];
+  const splitGroupIdentifier = uuidv4(); // Generate a unique ID for this split operation
+
+  // --- Validate and process each split portion ---
+  for (const [index, split] of splits.entries()) {
+    if (
+      !split.items ||
+      !Array.isArray(split.items) ||
+      split.items.length === 0
+    ) {
+      res.status(400);
+      throw new Error(
+        `Split portion ${index + 1} must contain at least one item.`
+      );
+    }
+
+    const splitBillItems = [];
+    let currentSplitAmount = 0;
+    const currentSplitItemsTracker = new Map(); // To track items within this specific split to prevent duplicates
+
+    for (const splitItem of split.items) {
+      if (
+        !splitItem.dish ||
+        !splitItem.quantity ||
+        typeof splitItem.quantity !== "number" ||
+        splitItem.quantity <= 0
+      ) {
+        res.status(400);
+        throw new Error(
+          `Invalid item details in split portion ${
+            index + 1
+          }. Each item must have a valid dish ID and positive quantity.`
+        );
+      }
+
+      const dishIdStr = splitItem.dish.toString();
+
+      // Check for duplicate items within the current split portion
+      if (currentSplitItemsTracker.has(dishIdStr)) {
+        res.status(400);
+        throw new Error(
+          `Duplicate dish ${dishIdStr} found within split portion ${
+            index + 1
+          }. Each item should appear once per split.`
+        );
+      }
+      currentSplitItemsTracker.set(dishIdStr, splitItem.quantity);
+
+      // Check if this dish is in the original accepted order items and if quantity is available
+      if (!acceptedOrderItemsMap.has(dishIdStr)) {
+        res.status(400);
+        throw new Error(
+          `Dish ID ${dishIdStr} in split portion ${
+            index + 1
+          } is not part of the original accepted order items.`
+        );
+      }
+
+      const originalDishInfo = acceptedOrderItemsMap.get(dishIdStr);
+      if (splitItem.quantity > originalDishInfo.quantity) {
+        res.status(400);
+        throw new Error(
+          `Quantity ${splitItem.quantity} for dish "${
+            originalDishInfo.dish.name
+          }" in split portion ${
+            index + 1
+          } exceeds available quantity in original order (${
+            originalDishInfo.quantity
+          }).`
+        );
+      }
+
+      splitBillItems.push({
+        dish: originalDishInfo.dish._id,
+        quantity: splitItem.quantity,
+        price: originalDishInfo.dish.price, // Use price from the populated original dish
+      });
+      currentSplitAmount += splitItem.quantity * originalDishInfo.dish.price;
+
+      // Decrement quantity from the master map of original accepted items
+      originalDishInfo.quantity -= splitItem.quantity;
+      if (originalDishInfo.quantity === 0) {
+        acceptedOrderItemsMap.delete(dishIdStr); // Remove if fully allocated
+      } else {
+        acceptedOrderItemsMap.set(dishIdStr, originalDishInfo); // Update remaining quantity
+      }
+    }
+
+    // Create the new Bill document for this split portion
+    const newBill = new Bill({
+      order: originalOrder._id,
+      billedBy: req.user._id,
+      items: splitBillItems,
+      totalAmount: currentSplitAmount,
+      paymentStatus: "pending",
+      customerPhoneNumber: originalOrder.customerPhoneNumber, // All splits get original order's phone for now
+      isSplitBill: true,
+      splitGroupIdentifier: splitGroupIdentifier,
+      originalOrderTotal: originalOrder.totalAmount, // Store original total for reference
+      customerName: split.customerName || `Split Customer ${index + 1}`, // Optional customer name per split
+    });
+    const createdBill = await newBill.save();
+    createdBills.push(createdBill);
+  }
+
+  // --- Final validation: Ensure all original accepted items were allocated ---
+  if (acceptedOrderItemsMap.size > 0) {
+    const unallocatedDishes = Array.from(acceptedOrderItemsMap.values())
+      .map((item) => `${item.dish.name} (Qty: ${item.quantity})`)
+      .join(", ");
+    // If there are remaining items, it means not all original items were covered by the splits
+    // In a real-world scenario, you might want to implement a transaction or rollback mechanism here.
+    // For now, we'll throw an error and rely on the client to handle partial success/failure.
+    res.status(400);
+    throw new Error(
+      `Not all original accepted order items were allocated in the splits. Unallocated: ${unallocatedDishes}`
+    );
+  }
+
+  // --- Mark original order as billed and completed ---
+  // This happens ONLY if all splits were successfully created and all items allocated.
+  originalOrder.isBilled = true;
+  originalOrder.orderStatus = "completed";
+  await originalOrder.save();
+
+  res.status(201).json({
+    message: "Bill successfully split into multiple portions.",
+    splitBills: createdBills.map((bill) => ({
+      _id: bill._id,
+      totalAmount: bill.totalAmount,
+      customerName: bill.customerName,
+      paymentStatus: bill.paymentStatus,
+      splitGroupIdentifier: bill.splitGroupIdentifier,
+      orderId: bill.order, // Include original order ID for reference
+    })),
+  });
 });
 
 // @desc    Get Daily Sales Report for a specific day or current day
@@ -520,6 +699,7 @@ module.exports = {
   getBills,
   getBillById,
   updateBillPaymentStatus,
+  splitBill,
   getDailySalesReport,
   getMonthlySalesReport,
   getMostOrderedDishes,
@@ -527,5 +707,3 @@ module.exports = {
   getStoredReportById,
   deleteStoredReport,
 };
-// how do i get all the daily reports here and how do I search a specific report
-// and also how can i delete a report using the same code I provided to get report by
