@@ -7,7 +7,9 @@ const {
     getDishById,
     updateDish,
     deleteDish,
-    toggleDishAvailability, // <--- NEW: Import the new function
+    toggleDishAvailability,
+    toggleDishSpecial,
+     
 } = require('../controllers/dishController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 const upload = require('../utils/upload');
@@ -23,10 +25,14 @@ router.route('/:id')
     .put(protect, authorizeRoles('admin', 'chef'), upload.single('image'), updateDish)
     .delete(protect, authorizeRoles('admin', 'chef'), deleteDish);
 
-// --- NEW ROUTE: Toggle Dish Availability ---
+//  Toggle Dish Availability 
 // PUT /api/dishes/:id/toggle-availability
 // Accessible by 'admin' or 'chef' roles
 router.put('/:id/toggle-availability', protect, authorizeRoles('admin', 'chef'), toggleDishAvailability);
 
+// Toggle Dish Special Status
+// PUT /api/dishes/:id/toggle-special
+// Accessible by 'admin' or 'chef' roles
+router.put('/:id/toggle-special', protect, authorizeRoles('admin', 'chef'), toggleDishSpecial);
 
 module.exports = router;

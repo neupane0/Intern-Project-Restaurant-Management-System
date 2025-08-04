@@ -10,7 +10,18 @@ const fs = require('fs');
 // @access  Private (Admin/Chef)
 const createDish = asyncHandler(async (req, res) => {
     // Destructure dietaryRestrictions 
-    const { name, description, price, category, isAvailable, dietaryRestrictions } = req.body;
+    const { 
+        name, 
+        description, 
+        price, 
+        category, 
+        isAvailable, 
+        dietaryRestrictions,
+        isSpecial,
+        specialPrice,
+        specialStartDate,
+        specialEndDate
+     } = req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : '';
 
     if (!name || !price) {
@@ -57,7 +68,13 @@ const createDish = asyncHandler(async (req, res) => {
         category,
         isAvailable,
         imageUrl,
-        dietaryRestrictions: dietaryRestrictions || [], //  Save dietaryRestrictions 
+        dietaryRestrictions: dietaryRestrictions || [], 
+        isSpecial,
+        specialPrice: isSpecial ? parseFloat(specialPrice) : undefined,
+        specialDateRange: {
+            start: isSpecial ? specialStartDate : undefined,
+            end: isSpecial ? specialEndDate : undefined,
+        }
     });
 
     res.status(201).json(dish);
@@ -90,7 +107,18 @@ const getDishById = asyncHandler(async (req, res) => {
 // @access  Private (Admin/Chef)
 const updateDish = asyncHandler(async (req, res) => {
     //  Destructure dietaryRestrictions 
-    const { name, description, price, category, isAvailable, dietaryRestrictions } = req.body;
+    const { 
+        name, 
+        description, 
+        price, 
+        category, 
+        isAvailable, 
+        dietaryRestrictions,
+        isSpecial,
+        specialPrice,
+        specialStartDate,
+        specialEndDate
+     } = req.body;
     let newImageUrl = req.file ? `/uploads/${req.file.filename}` : (req.body.imageUrl || '');
 
     const dish = await Dish.findById(req.params.id);
@@ -109,7 +137,12 @@ const updateDish = asyncHandler(async (req, res) => {
         dish.category = category !== undefined ? category : dish.category;
         dish.isAvailable = isAvailable !== undefined ? isAvailable : dish.isAvailable;
         dish.imageUrl = newImageUrl;
-        //  Update dietaryRestrictions 
+        dish.isSpecial = isSpecial !== undefined ? isSpecial : dish.isSpecial;
+        dish.specialPrice = isSpecial !== undefined ? (isSpecial ? parseFloat(specialPrice) : undefined) : dish.specialPrice;
+        dish.specialDateRange.start = isSpecial !== undefined ? (isSpecial ? specialStartDate : undefined) : dish.specialDateRange.start;
+        dish.specialDateRange.end = isSpecial !== undefined ? (isSpecial ? specialEndDate : undefined) : dish.specialDateRange.end;
+        
+
         if (dietaryRestrictions !== undefined) {
              if (!Array.isArray(dietaryRestrictions)) {
                 res.status(400);
@@ -189,7 +222,42 @@ const toggleDishAvailability = asyncHandler(async (req, res) => {
         throw new Error('Dish not found.');
     }
 });
+// @desc    Toggle dish special status
+// @route   PUT /api/dishes/:id/toggle-special
+// @access  Private (Admin/Chef)
+const toggleDishSpecial = asyncHandler(async (req, res) => {
+    const dish = await Dish.findById(req.params.id);
+    const { specialPrice, specialStartDate, specialEndDate } = req.body;
 
+
+    if (dish) {
+        dish.isSpecial = !dish.isSpecial;
+
+        if (dish.isSpecial) {
+            if (!specialPrice || !specialStartDate || !specialEndDate) {
+                res.status(400);
+                throw new Error('Special price, start date, and end date are required to make a dish special.');
+            }
+            dish.specialPrice = parseFloat(specialPrice);
+            dish.specialDateRange.start = specialStartDate;
+            dish.specialDateRange.end = specialEndDate;
+        } else {
+            dish.specialPrice = undefined;
+            dish.specialDateRange.start = undefined;
+            dish.specialDateRange.end = undefined;
+        }
+        const updatedDish = await dish.save();
+        res.json({
+            _id: updatedDish._id,
+            name: updatedDish.name,
+            isSpecial: updatedDish.isSpecial,
+            message: `Dish "${updatedDish.name}" special status toggled to ${updatedDish.isSpecial ? 'on' : 'off'}.`
+        });
+    } else {
+        res.status(404);
+        throw new Error('Dish not found.');
+    }
+});
 
 module.exports = {
     createDish,
@@ -198,6 +266,7 @@ module.exports = {
     updateDish,
     deleteDish,
     toggleDishAvailability,
+    toggleDishSpecial,
 };
 
 

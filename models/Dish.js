@@ -1,6 +1,8 @@
 // models/Dish.js
 const mongoose = require('mongoose');
 
+    
+
 const dishSchema = mongoose.Schema(
     {
         name: {
@@ -33,6 +35,23 @@ const dishSchema = mongoose.Schema(
             type: [String], 
             default: [],    
             enum: ['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'halal', 'kosher'], 
+        },
+        //Promotion fields
+        isSpecial: {
+            type: Boolean,
+            default: false,
+        },
+        specialPrice: {
+            type: Number,
+            min: 0,
+        },
+        specialDateRange: {
+            start: {
+                type: Date,
+            },
+            end: {
+                type: Date,
+            },
         },
     },
     {
