@@ -1,13 +1,13 @@
-// controllers/dishController.js
 const asyncHandler = require('express-async-handler');
 const Dish = require('../models/Dish');
 const path = require('path');
-const fs = require('fs');
+const fs = require('fs').promises; // Use the promise-based fs module for non-blocking I/O
 
-
-// @desc    Create a new dish
-// @route   POST /api/dishes
-// @access  Private (Admin/Chef)
+/**
+ * @desc    Create a new dish
+ * @route   POST /api/dishes
+ * @access  Private (Admin/Chef)
+ */
 const createDish = asyncHandler(async (req, res) => {
     // Destructure dietaryRestrictions 
     const { 
@@ -22,34 +22,36 @@ const createDish = asyncHandler(async (req, res) => {
         specialStartDate,
         specialEndDate
      } = req.body;
+
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : '';
+    const parsedPrice = parseFloat(price);
+
+    // Use a helper function for file deletion to avoid repetition
+    const deleteUploadedFile = async (filePath) => {
+        if (filePath) {
+            try {
+                await fs.unlink(filePath);
+            } catch (err) {
+                console.error('Error deleting incomplete upload:', err);
+            }
+        }
+    };
 
     if (!name || !price) {
-        if (req.file) {
-            fs.unlink(req.file.path, (err) => {
-                if (err) console.error('Error deleting incomplete upload:', err);
-            });
-        }
+        await deleteUploadedFile(req.file ? req.file.path : null);
         res.status(400);
         throw new Error('Dish name and price are required.');
     }
-    if (typeof parseFloat(price) !== 'number' || parseFloat(price) < 0) {
-        if (req.file) {
-            fs.unlink(req.file.path, (err) => {
-                if (err) console.error('Error deleting incomplete upload:', err);
-            });
-        }
+
+    if (isNaN(parsedPrice) || parsedPrice < 0) {
+        await deleteUploadedFile(req.file ? req.file.path : null);
         res.status(400);
         throw new Error('Price must be a non-negative number.');
     }
 
     const dishExists = await Dish.findOne({ name });
     if (dishExists) {
-        if (req.file) {
-            fs.unlink(req.file.path, (err) => {
-                if (err) console.error('Error deleting duplicate upload:', err);
-            });
-        }
+        await deleteUploadedFile(req.file ? req.file.path : null);
         res.status(400);
         throw new Error(`Dish with name "${name}" already exists.`);
     }
@@ -59,18 +61,18 @@ const createDish = asyncHandler(async (req, res) => {
         res.status(400);
         throw new Error('Dietary restrictions must be an array.');
     }
-    // Mongoose schema enum will handle validation of individual items in the array
 
+    const specialPriceValue = isSpecial ? parseFloat(specialPrice) : undefined;
     const dish = await Dish.create({
         name,
         description,
-        price: parseFloat(price),
+        price: parsedPrice,
         category,
         isAvailable,
         imageUrl,
         dietaryRestrictions: dietaryRestrictions || [], 
         isSpecial,
-        specialPrice: isSpecial ? parseFloat(specialPrice) : undefined,
+        specialPrice: isSpecial ? specialPriceValue : undefined,
         specialDateRange: {
             start: isSpecial ? specialStartDate : undefined,
             end: isSpecial ? specialEndDate : undefined,
@@ -80,17 +82,21 @@ const createDish = asyncHandler(async (req, res) => {
     res.status(201).json(dish);
 });
 
-// @desc    Get all dishes
-// @route   GET /api/dishes
-// @access  Public (Anyone can view menu) - or Private if only for staff
+/**
+ * @desc    Get all dishes
+ * @route   GET /api/dishes
+ * @access  Public (Anyone can view menu) - or Private if only for staff
+ */
 const getDishes = asyncHandler(async (req, res) => {
     const dishes = await Dish.find({});
     res.json(dishes);
 });
 
-// @desc    Get single dish by ID
-// @route   GET /api/dishes/:id
-// @access  Public (Anyone can view menu)
+/**
+ * @desc    Get single dish by ID
+ * @route   GET /api/dishes/:id
+ * @access  Public (Anyone can view menu)
+ */
 const getDishById = asyncHandler(async (req, res) => {
     const dish = await Dish.findById(req.params.id);
 
@@ -102,11 +108,13 @@ const getDishById = asyncHandler(async (req, res) => {
     }
 });
 
-// @desc    Update a dish
-// @route   PUT /api/dishes/:id
-// @access  Private (Admin/Chef)
+/**
+ * @desc    Update a dish
+ * @route   PUT /api/dishes/:id
+ * @access  Private (Admin/Chef)
+ */
 const updateDish = asyncHandler(async (req, res) => {
-    //  Destructure dietaryRestrictions 
+    // Destructure dietaryRestrictions 
     const { 
         name, 
         description, 
@@ -123,12 +131,21 @@ const updateDish = asyncHandler(async (req, res) => {
 
     const dish = await Dish.findById(req.params.id);
 
+    // Use a helper function for file deletion to avoid repetition
+    const deleteUploadedFile = async (filePath) => {
+        if (filePath) {
+            try {
+                await fs.unlink(filePath);
+            } catch (err) {
+                console.error('Error deleting uploaded file:', err);
+            }
+        }
+    };
+
     if (dish) {
         if (req.file && dish.imageUrl && dish.imageUrl.startsWith('/uploads/')) {
             const oldFilePath = path.join(__dirname, '..', dish.imageUrl);
-            fs.unlink(oldFilePath, (err) => {
-                if (err) console.error('Error deleting old image file:', oldFilePath, err);
-            });
+            await deleteUploadedFile(oldFilePath);
         }
 
         const updatedName = name !== undefined ? name : dish.name;
@@ -138,10 +155,13 @@ const updateDish = asyncHandler(async (req, res) => {
         dish.isAvailable = isAvailable !== undefined ? isAvailable : dish.isAvailable;
         dish.imageUrl = newImageUrl;
         dish.isSpecial = isSpecial !== undefined ? isSpecial : dish.isSpecial;
-        dish.specialPrice = isSpecial !== undefined ? (isSpecial ? parseFloat(specialPrice) : undefined) : dish.specialPrice;
-        dish.specialDateRange.start = isSpecial !== undefined ? (isSpecial ? specialStartDate : undefined) : dish.specialDateRange.start;
-        dish.specialDateRange.end = isSpecial !== undefined ? (isSpecial ? specialEndDate : undefined) : dish.specialDateRange.end;
         
+        if (isSpecial !== undefined) {
+             dish.specialPrice = isSpecial ? parseFloat(specialPrice) : undefined;
+             dish.specialDateRange.start = isSpecial ? specialStartDate : undefined;
+             dish.specialDateRange.end = isSpecial ? specialEndDate : undefined;
+        }
+
 
         if (dietaryRestrictions !== undefined) {
              if (!Array.isArray(dietaryRestrictions)) {
@@ -151,15 +171,10 @@ const updateDish = asyncHandler(async (req, res) => {
             dish.dietaryRestrictions = dietaryRestrictions;
         }
 
-
         if (updatedName !== dish.name) {
             const dishExists = await Dish.findOne({ name: updatedName });
             if (dishExists && dishExists._id.toString() !== dish._id.toString()) {
-                if (req.file) {
-                    fs.unlink(req.file.path, (err) => {
-                        if (err) console.error('Error deleting conflict upload:', err);
-                    });
-                }
+                await deleteUploadedFile(req.file ? req.file.path : null);
                 res.status(400);
                 throw new Error(`Dish with name "${updatedName}" already exists.`);
             }
@@ -169,30 +184,29 @@ const updateDish = asyncHandler(async (req, res) => {
         const updatedDish = await dish.save();
         res.json(updatedDish);
     } else {
-        if (req.file) {
-            fs.unlink(req.file.path, (err) => {
-                if (err) console.error('Error deleting orphaned upload:', err);
-            });
-        }
+        await deleteUploadedFile(req.file ? req.file.path : null);
         res.status(404);
         throw new Error('Dish not found.');
     }
 });
 
-// @desc    Delete a dish
-// @route   DELETE /api/dishes/:id
-// @access  Private (Admin/Chef)
+/**
+ * @desc    Delete a dish
+ * @route   DELETE /api/dishes/:id
+ * @access  Private (Admin/Chef)
+ */
 const deleteDish = asyncHandler(async (req, res) => {
     const dish = await Dish.findById(req.params.id);
 
     if (dish) {
         if (dish.imageUrl && dish.imageUrl.startsWith('/uploads/')) {
             const filePath = path.join(__dirname, '..', dish.imageUrl);
-            fs.unlink(filePath, (err) => {
-                if (err) console.error('Failed to delete image file:', filePath, err);
-            });
+            try {
+                await fs.unlink(filePath);
+            } catch (err) {
+                console.error('Failed to delete image file:', filePath, err);
+            }
         }
-
         await dish.deleteOne();
         res.json({ message: 'Dish removed successfully.' });
     } else {
@@ -201,9 +215,11 @@ const deleteDish = asyncHandler(async (req, res) => {
     }
 });
 
-// @desc    Toggle dish availability (isAvailable status)
-// @route   PUT /api/dishes/:id/toggle-availability
-// @access  Private (Admin/Chef)
+/**
+ * @desc    Toggle dish availability (isAvailable status)
+ * @route   PUT /api/dishes/:id/toggle-availability
+ * @access  Private (Admin/Chef)
+ */
 const toggleDishAvailability = asyncHandler(async (req, res) => {
     const dish = await Dish.findById(req.params.id);
 
@@ -222,13 +238,15 @@ const toggleDishAvailability = asyncHandler(async (req, res) => {
         throw new Error('Dish not found.');
     }
 });
-// @desc    Toggle dish special status
-// @route   PUT /api/dishes/:id/toggle-special
-// @access  Private (Admin/Chef)
+
+/**
+ * @desc    Toggle dish special status
+ * @route   PUT /api/dishes/:id/toggle-special
+ * @access  Private (Admin/Chef)
+ */
 const toggleDishSpecial = asyncHandler(async (req, res) => {
     const dish = await Dish.findById(req.params.id);
     const { specialPrice, specialStartDate, specialEndDate } = req.body;
-
 
     if (dish) {
         dish.isSpecial = !dish.isSpecial;
@@ -268,7 +286,3 @@ module.exports = {
     toggleDishAvailability,
     toggleDishSpecial,
 };
-
-
-
-
