@@ -1,5 +1,5 @@
 // routes/orderRoutes.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 const {
     createOrder,
@@ -7,9 +7,7 @@ const {
     getOrderById,
     updateOrderItemStatus,
     updateOrderStatus,
-    cancelOrder,
-    requestItemCancellation,
-    modifyOrderItem
+    cancelOrder
 } = require('../controllers/orderController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
@@ -32,10 +30,6 @@ router.put('/:orderId/item/:itemId/request-cancellation', protect, authorizeRole
 
 // Waiter/Admin cancel order
 router.put('/:id/cancel', protect, authorizeRoles('waiter', 'admin'), cancelOrder);
-
-// --- NEW ROUTE: Admin modifies an order item ---
-// PUT /api/orders/:orderId/item/:itemId/modify
-router.put('/:orderId/item/:itemId/modify', protect, authorizeRoles('admin'), modifyOrderItem);
 
 
 module.exports = router;

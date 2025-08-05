@@ -1,42 +1,62 @@
 // routes/billRoutes.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 const {
-    generateBill,
-    getBills,
-    getBillById,
-    updateBillPaymentStatus,
-    getDailySalesReport,
-    getMonthlySalesReport,
-    getMostOrderedDishes,
-    // *** FIX: Add the new report functions here ***
-    getStoredReports,
-    getStoredReportById,
-    deleteStoredReport,
-} = require('../controllers/billController'); // Ensure these are exported from billController.js
-const { protect, authorizeRoles } = require('../middleware/authMiddleware');
+  generateBill,
+  getBills,
+  getBillById,
+  updateBillPaymentStatus,
+  splitBill, // *** NEW: Import splitBill function ***
+  getDailySalesReport,
+  getMonthlySalesReport,
+  getMostOrderedDishes,
+  getStoredReports,
+  getStoredReportById,
+  deleteStoredReport,
+} = require("../controllers/billController");
+const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 
-// Billing routes (Admin only)
-router.post('/:orderId', protect, authorizeRoles('admin'), generateBill);
-router.route('/')
-    .get(protect, authorizeRoles('admin'), getBills);
-router.route('/:id')
-    .get(protect, authorizeRoles('admin'), getBillById)
-    .put(protect, authorizeRoles('admin'), updateBillPaymentStatus);
+// Route to generate a bill for a specific order (original bill)
+// POST /api/bills/:orderId
+router.route("/:orderId").post(protect, authorizeRoles("admin"), generateBill);
 
-// Reporting routes (Admin only)
-router.get('/reports/sales/daily', protect, authorizeRoles('admin'), getDailySalesReport);
-router.get('/reports/sales/monthly', protect, authorizeRoles('admin'), getMonthlySalesReport);
-router.get('/reports/dishes/most-ordered', protect, authorizeRoles('admin'), getMostOrderedDishes);
+// Routes to get all bills and specific bill by ID
+router.route("/").get(protect, authorizeRoles("admin"), getBills); // GET /api/bills
 
-// --- NEW ROUTES for Stored Reports (Admin only) ---
-// These routes were added in a previous step to handle the new Report model
-router.route('/reports/stored')
-    .get(protect, authorizeRoles('admin'), getStoredReports); // GET all stored reports
+router.route("/:id").get(protect, authorizeRoles("admin"), getBillById); // GET /api/bills/:id
 
-router.route('/reports/stored/:id')
-    .get(protect, authorizeRoles('admin'), getStoredReportById) // GET a specific stored report by ID
-    .delete(protect, authorizeRoles('admin'), deleteStoredReport); // DELETE a specific stored report by ID
+// Route to update payment status of a bill
+// PUT /api/bills/:id/pay
+router
+  .route("/:id/pay")
+  .put(protect, authorizeRoles("admin"), updateBillPaymentStatus);
 
+// --- NEW ROUTE FOR SPLIT BILL FUNCTIONALITY ---
+// POST /api/bills/:orderId/split
+// Accessible by 'admin' role
+router
+  .route("/:orderId/split")
+  .post(protect, authorizeRoles("admin"), splitBill);
+
+// Sales Report Routes (Admin only)
+router
+  .route("/reports/sales/daily")
+  .get(protect, authorizeRoles("admin"), getDailySalesReport);
+router
+  .route("/reports/sales/monthly")
+  .get(protect, authorizeRoles("admin"), getMonthlySalesReport);
+router
+  .route("/reports/dishes/most-ordered")
+  .get(protect, authorizeRoles("admin"), getMostOrderedDishes);
+
+// Routes for Stored Reports (Admin only)
+router
+  .route("/reports/stored")
+  .get(protect, authorizeRoles("admin"), getStoredReports);
+
+router
+  .route("/reports/stored/:id")
+  .get(protect, authorizeRoles("admin"), getStoredReportById)
+  .delete(protect, authorizeRoles("admin"), deleteStoredReport);
 
 module.exports = router;
