@@ -2,6 +2,8 @@
 const asyncHandler = require("express-async-handler");
 const Order = require("../models/Order");
 const Dish = require("../models/Dish"); // To get dish price
+const { sendWhatsAppMessage } = require('../utils/whatsappService'); // Assuming this is imported for other functions
+const User = require('../models/User'); // Assuming this is imported for other functions
 
 // @desc    Create a new order
 // @route   POST /api/orders
@@ -16,6 +18,8 @@ const createOrder = asyncHandler(async (req, res) => {
 
     // Validate and prepare order items
     const orderItems = [];
+    let initialTotal = 0; // FIX: Initialize initialTotal here
+
     for (const item of items) {
         const dish = await Dish.findById(item.dish);
         if (!dish) {
@@ -32,28 +36,32 @@ const createOrder = asyncHandler(async (req, res) => {
             status: 'pending', // Default status for new items
             notes: item.notes || '', // Capture notes for the item
         });
+        initialTotal += dish.price * item.quantity; // FIX: Accumulate total
     }
 
-  // 3. Create the order document
-  const order = new Order({
-    tableNumber,
-    customerName, // --- NEW: Save customerName ---
-    customerPhoneNumber, // --- NEW: Save customerPhoneNumber ---
-    waiter: req.user._id, // The logged-in waiter
-    items: orderItems,
-    totalAmount: initialTotal, // This will be recalculated by pre-save hook
-    orderStatus: "pending",
-  });
+    // 3. Create the order document
+    const order = new Order({
+        tableNumber,
+        customerName,
+        customerPhoneNumber,
+        waiter: req.user._id, // The logged-in waiter
+        items: orderItems,
+        // The pre-save hook on Order model will recalculate totalAmount based on accepted items.
+        // We can pass initialTotal here, but the hook will override it with the correct value
+        // based on the prices fetched from the Dish model and 'accepted' status.
+        totalAmount: initialTotal,
+        orderStatus: "pending",
+    });
 
-  const createdOrder = await order.save(); // The pre-save hook on Order model will run here
+    const createdOrder = await order.save(); // The pre-save hook on Order model will run here
 
-  // 4. Respond with the created order, populating dish details for the client
-  const populatedOrder = await Order.findById(createdOrder._id)
-    .populate({
-      path: "items.dish",
-      select: "name price description category",
-    })
-    .populate("waiter", "name email");
+    // 4. Respond with the created order, populating dish details for the client
+    const populatedOrder = await Order.findById(createdOrder._id)
+        .populate({
+            path: "items.dish",
+            select: "name price description category",
+        })
+        .populate("waiter", "name email");
 
     res.status(201).json(populatedOrder);
 });
@@ -333,9 +341,9 @@ const manageItemCancellation = asyncHandler(async (req, res) => {
 
         // Send WhatsApp notification for approved cancellation
         const messageBody = `Hello ${order.customerName}!\n\n` +
-                            `Your request to cancel "${dishName}" (Quantity: ${item.quantity}) from your order for Table ${order.tableNumber} ` +
-                            `has been *APPROVED* by ${adminName}.\n\n` +
-                            `Your order total will be adjusted accordingly.`;
+            `Your request to cancel "${dishName}" (Quantity: ${item.quantity}) from your order for Table ${order.tableNumber} ` +
+            `has been *APPROVED* by ${adminName}.\n\n` +
+            `Your order total will be adjusted accordingly.`;
         await sendWhatsAppMessage(customerPhoneNumber, messageBody);
 
     } else if (action === 'reject') {
@@ -348,9 +356,9 @@ const manageItemCancellation = asyncHandler(async (req, res) => {
 
         // Send WhatsApp notification for rejected cancellation
         const messageBody = `Hello ${order.customerName}!\n\n` +
-                            `Your request to cancel "${dishName}" (Quantity: ${item.quantity}) from your order for Table ${order.tableNumber} ` +
-                            `has been *REJECTED* by ${adminName}.\n\n` +
-                            `The item will remain part of your order. Please contact staff for further assistance.`;
+            `Your request to cancel "${dishName}" (Quantity: ${item.quantity}) from your order for Table ${order.tableNumber} ` +
+            `has been *REJECTED* by ${adminName}.\n\n` +
+            `The item will remain part of your order. Please contact staff for further assistance.`;
         await sendWhatsAppMessage(customerPhoneNumber, messageBody);
 
     } else {
@@ -367,12 +375,81 @@ const manageItemCancellation = asyncHandler(async (req, res) => {
     res.json(populatedOrder);
 });
 
+// @desc    Admin modifies an existing order item (dish and/or quantity)
+// @route   PUT /api/orders/:orderId/item/:itemId/modify
+// @access  Private/Admin
+const modifyOrderItem = asyncHandler(async (req, res) => {
+    const { orderId, itemId } = req.params;
+    // New dish ID and/or new quantity from request body
+    const { dish: newDishId, quantity: newQuantity } = req.body;
+
+    const order = await Order.findById(orderId);
+
+    if (!order) {
+        res.status(404);
+        throw new Error('Order not found');
+    }
+
+    // Prevent modification if order is already billed, completed, or cancelled
+    if (order.isBilled || order.orderStatus === 'completed' || order.orderStatus === 'cancelled') {
+        res.status(400);
+        throw new Error(`Cannot modify order items for an order that is ${order.orderStatus} or already billed.`);
+    }
+
+    const itemToModify = order.items.id(itemId);
+
+    if (!itemToModify) {
+        res.status(404);
+        throw new Error('Order item not found in this order');
+    }
+
+    // Validate new quantity if provided
+    if (newQuantity !== undefined) {
+        if (typeof newQuantity !== 'number' || newQuantity <= 0) {
+            res.status(400);
+            throw new Error('New quantity must be a positive number.');
+        }
+        itemToModify.quantity = newQuantity;
+    }
+
+    // Validate and update dish if newDishId is provided
+    if (newDishId !== undefined) {
+        const newDish = await Dish.findById(newDishId);
+        if (!newDish) {
+            res.status(404);
+            throw new Error(`New dish with ID ${newDishId} not found.`);
+        }
+        if (!newDish.isAvailable) {
+            res.status(400);
+            throw new Error(`New dish "${newDish.name}" is currently not available.`);
+        }
+        itemToModify.dish = newDish._id; // Update the dish reference
+        itemToModify.status = 'pending'; // Reset item status to pending if dish is changed
+    }
+
+    // Save the order. The pre-save hook will recalculate totalAmount.
+    const updatedOrder = await order.save();
+
+    // Populate the updated order for the response
+    const populatedOrder = await Order.findById(updatedOrder._id)
+        .populate({
+            path: 'items.dish',
+            select: 'name price description category'
+        })
+        .populate('waiter', 'name email');
+
+    res.json(populatedOrder);
+});
+
 
 module.exports = {
-  createOrder,
-  getOrders,
-  getOrderById,
-  updateOrderItemStatus,
-  updateOrderStatus,
-  cancelOrder,
+    createOrder,
+    getOrders,
+    getOrderById,
+    updateOrderItemStatus,
+    updateOrderStatus,
+    cancelOrder,
+    requestItemCancellation,
+    manageItemCancellation,
+    modifyOrderItem
 };
