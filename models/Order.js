@@ -17,7 +17,6 @@ const orderItemSchema = new mongoose.Schema({
   // Status for individual item in the kitchen workflow
   status: {
     type: String,
-    //  Added 'cancellation_requested' to enum
     enum: [
       "pending",
       "accepted",
@@ -124,6 +123,11 @@ orderSchema.pre("save", async function (next) {
   }
   next();
 });
+
+// Add an index to the 'status' field within the 'items' array
+// This creates a multi-key index, significantly speeding up queries
+// that filter orders based on item statuses (e.g., for the Chef Dashboard).
+orderSchema.index({ 'items.status': 1 });
 
 const Order = mongoose.model("Order", orderSchema);
 
