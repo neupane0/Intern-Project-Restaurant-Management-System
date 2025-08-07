@@ -3,7 +3,8 @@ const reportSchema = mongoose.Schema(
     {
         reportType: {
             type: String,
-            enum: ['dailt_sales','monthly_sales', 'most_ordered_dishes'],
+            // FIX: Corrected 'dailt_sales' to 'daily_sales'
+            enum: ['daily_sales', 'monthly_sales', 'most_ordered_dishes', 'ingredient_usage'],
             required: true
 
         },
@@ -26,7 +27,7 @@ const reportSchema = mongoose.Schema(
 
     },
     {
-        timestamps: true,   
+        timestamps: true,  
     }
 );
 
@@ -37,3 +38,4 @@ reportSchema.index({ reportType: 1, reportDate: 1 }, { unique: true });
 const Report = mongoose.model('Report', reportSchema);
 
 module.exports = Report;
+
