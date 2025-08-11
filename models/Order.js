@@ -48,8 +48,7 @@ const orderSchema = new mongoose.Schema({
     completed: { type: Date },
   },
 });
-
-// Pre-save hook to calculate totalAmount before saving the order
+// --- CRITICAL UPDATE: pre('save') hook for totalAmount and NEW: Timestamps ---
 orderSchema.pre("save", async function (next) {
   if (
     this.isModified("items") ||
@@ -57,6 +56,8 @@ orderSchema.pre("save", async function (next) {
     this.isModified("orderStatus")
   ) {
     await this.populate("items.dish");
+
+    // Recalculate totalAmount based on 'accepted' items
     this.totalAmount = this.items.reduce((acc, orderItem) => {
       if (
         orderItem.dish &&
@@ -72,7 +73,21 @@ orderSchema.pre("save", async function (next) {
       );
       return acc;
     }, 0);
-    this.depopulate("items.dish");
+
+    // --- NEW LOGIC: Update timestamps based on orderStatus changes ---
+    const now = new Date();
+    if (this.isModified("orderStatus")) {
+      if (this.orderStatus === "preparing" && !this.timestamps.preparing) {
+        this.timestamps.preparing = now;
+      } else if (this.orderStatus === "ready" && !this.timestamps.ready) {
+        this.timestamps.ready = now;
+      } else if (
+        this.orderStatus === "completed" &&
+        !this.timestamps.completed
+      ) {
+        this.timestamps.completed = now;
+      }
+    }
   }
   next();
 });
