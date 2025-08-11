@@ -40,6 +40,13 @@ const orderSchema = new mongoose.Schema({
       "Please enter a valid phone number in E.164 format (e.g., +1234567890)",
     ],
   },
+  //  NEW: Timestamps for status tracking
+  timestamps: {
+    pending: { type: Date, default: Date.now },
+    preparing: { type: Date },
+    ready: { type: Date },
+    completed: { type: Date },
+  },
 });
 
 // Pre-save hook to calculate totalAmount before saving the order
@@ -70,6 +77,6 @@ orderSchema.pre("save", async function (next) {
   next();
 });
 
-const Order = mongoose.model('Order', orderSchema);
+const Order = mongoose.model("Order", orderSchema);
 
 module.exports = Order;
