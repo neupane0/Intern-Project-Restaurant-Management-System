@@ -35,7 +35,7 @@ router
   ) // <--- UPDATED
   // GET /api/orders: Get all orders (Admin, Chef, or Waiter - Waiter gets only their own as per controller)
   .get(protect, authorizeRoles("admin", "chef", "waiter"), getOrders);
-
+router.get("/kds", protect, authorizeRoles("chef", "admin"), getKDSOrders);
 // Individual order routes by ID
 router
   .route("/:id")
