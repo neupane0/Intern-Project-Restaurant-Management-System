@@ -1,25 +1,28 @@
 // models/Order.js
 const mongoose = require("mongoose");
 
-// Sub-schema for individual items within an order
 const orderItemSchema = new mongoose.Schema({
   dish: { type: mongoose.Schema.Types.ObjectId, ref: "Dish", required: true },
   quantity: { type: Number, required: true, min: 1 },
   status: {
     type: String,
-    enum: ["pending", "accepted", "declined"],
+    enum: [
+      "pending",
+      "accepted",
+      "declined",
+      "preparing",
+      "ready",
+      "cancelled",
+      "cancellation_requested",
+    ],
     default: "pending",
   },
-  notes: {
-    // <--- NEW: Special requests or notes for this specific dish item
-    type: String,
-    trim: true,
-    default: "",
-  },
+  notes: { type: String, default: "" },
 });
 
 const orderSchema = new mongoose.Schema({
   tableNumber: { type: String, required: true },
+  customerName: { type: String, required: true },
   waiter: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   items: [orderItemSchema], // Array of dishes in the order
   orderStatus: {
@@ -30,17 +33,15 @@ const orderSchema = new mongoose.Schema({
   totalAmount: { type: Number, default: 0 },
   orderDate: { type: Date, default: Date.now },
   isBilled: { type: Boolean, default: false },
-  // --- NEW FIELD: Customer Phone Number ---
   customerPhoneNumber: {
     type: String,
-    required: true, // Making it required for WhatsApp feature
-    // Basic regex for phone numbers (adjust as per country codes/format needed)
+    required: true,
     match: [
       /^\+[1-9]\d{1,14}$/,
       "Please enter a valid phone number in E.164 format (e.g., +1234567890)",
     ],
   },
-  //  NEW: Timestamps for status tracking
+  // --- NEW: Timestamps for status tracking ---
   timestamps: {
     pending: { type: Date, default: Date.now },
     preparing: { type: Date },
@@ -48,6 +49,7 @@ const orderSchema = new mongoose.Schema({
     completed: { type: Date },
   },
 });
+
 // --- CRITICAL UPDATE: pre('save') hook for totalAmount and NEW: Timestamps ---
 orderSchema.pre("save", async function (next) {
   if (

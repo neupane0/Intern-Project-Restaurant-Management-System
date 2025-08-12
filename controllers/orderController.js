@@ -106,7 +106,7 @@ const getOrders = asyncHandler(async (req, res) => {
   res.json(orders);
 });
 
-// NEW: Get all orders for KDS (Kitchen Display System)
+// --- NEW: Get all orders for KDS (Kitchen Display System) ---
 // @desc    Get orders for the KDS (Kitchen Display System)
 // @route   GET /api/orders/kds
 // @access  Private (Chef/Admin)
@@ -204,15 +204,19 @@ const updateOrderItemStatus = asyncHandler(async (req, res) => {
     if (orderItem.status === "pending") {
       allItemsProcessed = false;
     }
-    if (orderItem.status === "accepted") {
+    if (
+      orderItem.status === "accepted" ||
+      orderItem.status === "preparing" ||
+      orderItem.status === "ready"
+    ) {
       anyItemsAccepted = true;
-    }
-    if (orderItem.status === "accepted" && orderItem.status !== "ready") {
-      allItemsReady = false;
+      if (orderItem.status !== "ready") {
+        allItemsReady = false;
+      }
     }
   }
 
-  //  NEW LOGIC: Update orderStatus and timestamps based on item status changes
+  // --- NEW LOGIC: Update orderStatus and timestamps based on item status changes ---
   const oldOrderStatus = order.orderStatus;
   if (allItemsProcessed && anyItemsAccepted) {
     order.orderStatus = "preparing";
@@ -272,7 +276,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     );
   }
 
-  // NEW: Capture old status for pre-save hook trigger
+  // --- NEW: Capture old status for pre-save hook trigger ---
   const oldOrderStatus = order.orderStatus;
   order.orderStatus = status;
 
@@ -307,7 +311,7 @@ const cancelOrder = asyncHandler(async (req, res) => {
     throw new Error("Not authorized to cancel this order.");
   }
 
-  //  NEW: Capture old status for pre-save hook trigger
+  // --- NEW: Capture old status for pre-save hook trigger ---
   const oldOrderStatus = order.orderStatus;
   order.orderStatus = "cancelled";
   order.items.forEach((item) => {
@@ -508,7 +512,7 @@ const modifyOrderItem = asyncHandler(async (req, res) => {
 module.exports = {
   createOrder,
   getOrders,
-  getKDSOrders, // NEW: Export the new KDS function
+  getKDSOrders, // --- NEW: Export the new KDS function ---
   getOrderById,
   updateOrderItemStatus,
   updateOrderStatus,

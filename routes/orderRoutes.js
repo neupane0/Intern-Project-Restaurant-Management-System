@@ -4,6 +4,7 @@ const router = express.Router();
 const {
   createOrder,
   getOrders,
+  getKDSOrders,
   getOrderById,
   updateOrderItemStatus,
   updateOrderStatus,
@@ -23,9 +24,23 @@ router.get("/kds", protect, authorizeRoles("chef", "admin"), getKDSOrders);
 // Routes for specific order by ID
 router
   .route("/:id")
-  .get(protect, authorizeRoles("admin", "chef", "waiter"), getOrderById) // Get single order
-  .put(protect, authorizeRoles("admin", "chef"), updateOrderStatus) // Update overall order status
-  .put(protect, authorizeRoles("waiter", "admin"), cancelOrder); // Cancel entire order (Waiters can only cancel their own)
+  .get(protect, authorizeRoles("admin", "chef", "waiter"), getOrderById); // Get single order
+
+// Route to update overall order status
+router.put(
+  "/:id/status",
+  protect,
+  authorizeRoles("admin", "chef"),
+  updateOrderStatus
+);
+
+// Route to cancel entire order
+router.put(
+  "/:id/cancel",
+  protect,
+  authorizeRoles("waiter", "admin"),
+  cancelOrder
+);
 
 // Route to update individual order item status (for chef)
 router.put(
