@@ -27,8 +27,8 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["admin", "chef", "waiter"], // Restricts roles to these specific values
-      default: "waiter", // Default role for new registrations if not specified
+      enum: ["admin", "chef", "waiter", "customer"], // Restricts roles to these specific values
+      default: "customer", // Default role for new registrations if not specified
     },
     // Fields for password reset
     resetPasswordToken: String, // Stores the hashed reset token

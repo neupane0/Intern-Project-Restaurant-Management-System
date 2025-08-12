@@ -8,6 +8,8 @@ const {
     updateReservationStatus,
     deleteReservation,
     getAvailableTables,
+    getPendingCustomerReservations,
+    approveCustomerReservation,
 } = require('../controllers/reservationController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
@@ -20,8 +22,8 @@ router.get('/available', getAvailableTables); // <--- MODIFIED: Removed 'protect
 // Base routes for reservations
 router.route('/')
     // POST /api/reservations: Create a new reservation
-    // Accessible by 'admin', 'waiter', or 'user' (customer) roles
-    .post(protect, authorizeRoles('admin', 'waiter', 'user'), createReservation)
+    // Accessible by 'admin' or 'waiter' roles only
+    .post(protect, authorizeRoles('admin', 'waiter'), createReservation)
     // GET /api/reservations: Get all reservations (Admin only)
     .get(protect, authorizeRoles('admin'), getReservations);
 
@@ -32,6 +34,10 @@ router.route('/:id')
 
 // Route to update reservation status (Admin only)
 router.put('/:id/status', protect, authorizeRoles('admin'), updateReservationStatus);
+
+// Routes for customer reservation approval (Admin only)
+router.get('/pending-customer', protect, authorizeRoles('admin'), getPendingCustomerReservations);
+router.put('/:id/approve', protect, authorizeRoles('admin'), approveCustomerReservation);
 
 
 module.exports = router;

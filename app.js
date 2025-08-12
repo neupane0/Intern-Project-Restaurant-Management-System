@@ -13,6 +13,7 @@ const dishRoutes = require('./routes/dishRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const billRoutes = require('./routes/billRoutes');
 const reservationRoutes = require('./routes/reservationRoutes');
+const customerReservationRoutes = require('./routes/customerReservationRoutes');
 
 // Load environment variables
 dotenv.config();
@@ -40,6 +41,7 @@ app.use('/api/dishes', dishRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/bills', billRoutes); // Billing and Reports
 app.use('/api/reservations', reservationRoutes);
+app.use('/api/customer/reservations', customerReservationRoutes);
 
 
 // Error Handling Middleware (must be after all routes)

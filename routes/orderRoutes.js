@@ -7,7 +7,8 @@ const {
     getOrderById,
     updateOrderItemStatus,
     updateOrderStatus,
-    cancelOrder
+    cancelOrder,
+    requestItemCancellation,
 } = require('../controllers/orderController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 

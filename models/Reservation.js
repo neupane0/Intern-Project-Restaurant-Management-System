@@ -34,6 +34,17 @@ const reservationSchema = new mongoose.Schema(
             enum: ['pending', 'confirmed', 'seated', 'cancelled', 'completed'],
             default: 'pending',
         },
+        isCustomerReservation: {
+            type: Boolean,
+            default: false,
+        },
+        approvedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+        approvedAt: {
+            type: Date,
+        },
         reservedBy: { // User (Admin) who made the reservation
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',

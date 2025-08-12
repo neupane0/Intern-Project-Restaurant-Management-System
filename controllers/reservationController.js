@@ -12,7 +12,7 @@ const ALL_TABLE_NUMBERS = ['T-1', 'T-2', 'T-3', 'T-4', 'T-5', 'T-6', 'T-7', 'T-8
 
 // @desc    Create a new table reservation
 // @route   POST /api/reservations
-// @access  Private/Admin, Waiter, User (Customer)
+// @access  Private/Admin, Waiter
 const createReservation = asyncHandler(async (req, res) => {
     const { tableNumber, customerName, customerPhoneNumber, numberOfGuests, reservationTime, notes } = req.body;
 
@@ -68,7 +68,9 @@ const createReservation = asyncHandler(async (req, res) => {
         numberOfGuests,
         reservationTime: parsedReservationTime, // Use the parsed Date object
         notes,
-        reservedBy: req.user._id, // The authenticated user (admin, waiter, or customer) making the reservation
+        reservedBy: req.user._id, // The authenticated user (admin or waiter) making the reservation
+        isCustomerReservation: false, // Admin/waiter reservations are not customer reservations
+        status: 'confirmed', // Admin/waiter reservations are automatically confirmed
     });
 
     res.status(201).json(reservation);
@@ -143,6 +145,13 @@ const updateReservationStatus = asyncHandler(async (req, res) => {
 
     const oldStatus = reservation.status; // Store old status for comparison
     reservation.status = status;
+    
+    // If confirming a customer reservation, set approval details
+    if (status === 'confirmed' && reservation.isCustomerReservation && oldStatus === 'pending') {
+        reservation.approvedBy = req.user._id;
+        reservation.approvedAt = new Date();
+    }
+    
     const updatedReservation = await reservation.save();
 
     // NEW: Send WhatsApp notification if status changes to 'confirmed'
@@ -161,6 +170,81 @@ const updateReservationStatus = asyncHandler(async (req, res) => {
     }
 
     res.json(updatedReservation);
+});
+
+// @desc    Get pending customer reservations for admin approval
+// @route   GET /api/reservations/pending-customer
+// @access  Private/Admin
+const getPendingCustomerReservations = asyncHandler(async (req, res) => {
+    const reservations = await Reservation.find({
+        isCustomerReservation: true,
+        status: 'pending'
+    })
+    .populate('reservedBy', 'name email')
+    .sort({ createdAt: 1 });
+
+    res.json(reservations);
+});
+
+// @desc    Approve or reject customer reservation
+// @route   PUT /api/reservations/:id/approve
+// @access  Private/Admin
+const approveCustomerReservation = asyncHandler(async (req, res) => {
+    const { action } = req.body; // 'approve' or 'reject'
+
+    if (!['approve', 'reject'].includes(action)) {
+        res.status(400);
+        throw new Error('Action must be either "approve" or "reject"');
+    }
+
+    const reservation = await Reservation.findById(req.params.id);
+
+    if (!reservation) {
+        res.status(404);
+        throw new Error('Reservation not found');
+    }
+
+    if (!reservation.isCustomerReservation) {
+        res.status(400);
+        throw new Error('This is not a customer reservation');
+    }
+
+    if (reservation.status !== 'pending') {
+        res.status(400);
+        throw new Error('Reservation is not in pending status');
+    }
+
+    const oldStatus = reservation.status;
+    
+    if (action === 'approve') {
+        reservation.status = 'confirmed';
+        reservation.approvedBy = req.user._id;
+        reservation.approvedAt = new Date();
+    } else {
+        reservation.status = 'cancelled';
+    }
+
+    const updatedReservation = await reservation.save();
+
+    // Send WhatsApp notification if approved
+    if (action === 'approve') {
+        const adminUser = await User.findById(req.user._id).select('name');
+        const adminName = adminUser ? adminUser.name : 'Admin';
+
+        const messageBody = `Hello ${updatedReservation.customerName}!\n\n` +
+                            `Your reservation for Table ${updatedReservation.tableNumber} ` +
+                            `at ${updatedReservation.reservationTime.toLocaleString()} for ${updatedReservation.numberOfGuests} guests ` +
+                            `has been *APPROVED* by ${adminName}.\n\n` +
+                            `We look forward to seeing you!\n` +
+                            `Restaurant Name`;
+
+        await sendWhatsAppMessage(updatedReservation.customerPhoneNumber, messageBody);
+    }
+
+    res.json({
+        message: `Reservation ${action}d successfully`,
+        reservation: updatedReservation
+    });
 });
 
 // @desc    Delete a reservation
@@ -241,4 +325,6 @@ module.exports = {
     updateReservationStatus,
     deleteReservation,
     getAvailableTables,
+    getPendingCustomerReservations,
+    approveCustomerReservation,
 };

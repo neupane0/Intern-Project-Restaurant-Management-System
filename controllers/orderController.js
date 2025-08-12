@@ -509,4 +509,5 @@ module.exports = {
   updateOrderItemStatus,
   updateOrderStatus,
   cancelOrder,
+  requestItemCancellation,
 };
