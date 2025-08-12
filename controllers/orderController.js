@@ -89,7 +89,7 @@ const createOrder = asyncHandler(async (req, res) => {
             notes: item.notes || '', // Capture notes for the item
         });
     }
-
+  }
   // 3. Create the order document
   const order = new Order({
     tableNumber,
@@ -112,7 +112,7 @@ const createOrder = asyncHandler(async (req, res) => {
     .populate("waiter", "name email");
 
   res.status(201).json(populatedOrder);
-});
+  });
 
 // @desc    Get all orders (with optional filters for history)
 // @route   GET /api/orders
