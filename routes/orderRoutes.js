@@ -4,10 +4,13 @@ const router = express.Router();
 const {
     createOrder,
     getOrders,
+    getKDSOrders,
     getOrderById,
     updateOrderItemStatus,
     updateOrderStatus,
-    cancelOrder
+    cancelOrder,
+    requestItemCancellation,
+    manageItemCancellation,
 } = require('../controllers/orderController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 

@@ -7,15 +7,15 @@ const BASE_URL = 'http://localhost:5000/api';
 
 // Test data
 const testCustomer = {
-    name: 'John Customer',
-    email: 'john.customer@example.com',
+    name: 'Test Customer',
+    email: 'test.customer@example.com',
     password: 'password123',
     role: 'customer'
 };
 
 const testReservation = {
-    tableNumber: 'T-1',
-    customerName: 'John Customer',
+    tableNumber: 'T-2', // Use T-2 since T-1 might be taken from previous test
+    customerName: 'Test Customer',
     customerPhoneNumber: '+1234567890',
     numberOfGuests: 4,
     reservationTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Tomorrow
@@ -23,27 +23,52 @@ const testReservation = {
 };
 
 const testAdmin = {
-    name: 'Admin User',
-    email: 'admin@restaurant.com',
+    name: 'Test Admin',
+    email: 'test.admin@restaurant.com',
     password: 'admin123',
     role: 'admin'
 };
+
+async function registerOrLogin(user) {
+    try {
+        console.log(`   Attempting to register ${user.role}...`);
+        const registerRes = await axios.post(`${BASE_URL}/auth/register`, user);
+        console.log(`   ✅ ${user.role} registered successfully`);
+        return registerRes.data.token;
+    } catch (err) {
+        const message = err.response?.data?.message || '';
+        if (err.response?.status === 400 && message.toLowerCase().includes('user already exists')) {
+            console.log(`   ⚠️  ${user.role} already exists, attempting login...`);
+            try {
+                const loginRes = await axios.post(`${BASE_URL}/auth/login`, {
+                    email: user.email,
+                    password: user.password,
+                });
+                console.log(`   ✅ ${user.role} logged in successfully`);
+                return loginRes.data.token;
+            } catch (loginErr) {
+                console.log(`   ❌ Login failed: ${loginErr.response?.data?.message || loginErr.message}`);
+                throw loginErr;
+            }
+        }
+        console.log(`   ❌ Registration failed: ${message}`);
+        throw err;
+    }
+}
 
 async function testCustomerReservationFlow() {
     try {
         console.log('🚀 Testing Customer Reservation Flow...\n');
 
-        // Step 1: Register a customer
-        console.log('1. Registering a customer...');
-        const customerResponse = await axios.post(`${BASE_URL}/auth/register`, testCustomer);
-        const customerToken = customerResponse.data.token;
-        console.log('✅ Customer registered successfully\n');
+        // Step 1: Register or login a customer
+        console.log('1. Ensuring customer account...');
+        const customerToken = await registerOrLogin(testCustomer);
+        console.log('✅ Customer token acquired\n');
 
-        // Step 2: Register an admin (if needed)
-        console.log('2. Registering an admin...');
-        const adminResponse = await axios.post(`${BASE_URL}/auth/register`, testAdmin);
-        const adminToken = adminResponse.data.token;
-        console.log('✅ Admin registered successfully\n');
+        // Step 2: Register or login an admin
+        console.log('2. Ensuring admin account...');
+        const adminToken = await registerOrLogin(testAdmin);
+        console.log('✅ Admin token acquired\n');
 
         // Step 3: Customer checks available tables
         console.log('3. Customer checking available tables...');

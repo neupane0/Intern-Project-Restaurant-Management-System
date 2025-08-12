@@ -517,4 +517,6 @@ module.exports = {
   updateOrderItemStatus,
   updateOrderStatus,
   cancelOrder,
+  requestItemCancellation,
+  manageItemCancellation,
 };

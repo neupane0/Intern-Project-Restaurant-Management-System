@@ -18,6 +18,9 @@ const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 // Accessible by ANY guest (no login required)
 router.get('/available', getAvailableTables); // <--- MODIFIED: Removed 'protect' middleware
 
+// Routes for customer reservation approval (Admin only) - MUST come BEFORE /:id routes
+router.get('/pending-customer', protect, authorizeRoles('admin'), getPendingCustomerReservations);
+router.put('/:id/approve', protect, authorizeRoles('admin'), approveCustomerReservation);
 
 // Base routes for reservations
 router.route('/')
@@ -34,10 +37,6 @@ router.route('/:id')
 
 // Route to update reservation status (Admin only)
 router.put('/:id/status', protect, authorizeRoles('admin'), updateReservationStatus);
-
-// Routes for customer reservation approval (Admin only)
-router.get('/pending-customer', protect, authorizeRoles('admin'), getPendingCustomerReservations);
-router.put('/:id/approve', protect, authorizeRoles('admin'), approveCustomerReservation);
 
 
 module.exports = router;
