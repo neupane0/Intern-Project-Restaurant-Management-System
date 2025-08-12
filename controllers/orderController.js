@@ -2,103 +2,64 @@
 const asyncHandler = require("express-async-handler");
 const Order = require("../models/Order");
 const Dish = require("../models/Dish"); // To get dish price
+const { sendWhatsAppMessage } = require("../utils/whatsappService");
+const User = require("../models/User");
 
-// @desc    Create a new order (with reordering capability)
+// @desc    Create a new order
 // @route   POST /api/orders
 // @access  Private (Waiter/Admin)
 const createOrder = asyncHandler(async (req, res) => {
-  // NEW: Add reorderFromOrderId to destructuring
-  const {
-    tableNumber,
-    customerName,
-    customerPhoneNumber,
-    items,
-    reorderFromOrderId,
-  } = req.body;
+  const { tableNumber, customerName, customerPhoneNumber, items } = req.body;
 
-  let orderItems = [];
-  let finalCustomerName = customerName;
-  let finalCustomerPhoneNumber = customerPhoneNumber;
-
-  if (reorderFromOrderId) {
-    // --- Reordering from a past order ---
-    const pastOrder = await Order.findById(reorderFromOrderId);
-
-    if (!pastOrder) {
-      res.status(404);
-      throw new Error("Past order for reordering not found.");
-    }
-
-    // Use customer details from past order if not explicitly provided in new request
-    finalCustomerName = customerName || pastOrder.customerName;
-    finalCustomerPhoneNumber =
-      customerPhoneNumber || pastOrder.customerPhoneNumber;
-
-    // Filter out cancelled/declined items from the past order for reordering
-    for (const item of pastOrder.items) {
-      if (item.status !== "cancelled" && item.status !== "declined") {
-        const dish = await Dish.findById(item.dish);
-        if (!dish || !dish.isAvailable) {
-          // Check if dish still exists and is available
-          console.warn(`Skipping unavailable dish ${item.dish} from reorder.`);
-          continue; // Skip this item if it's no longer available
-        }
-        orderItems.push({
-          dish: item.dish,
-          quantity: item.quantity,
-          status: "pending",
-          notes: item.notes || "",
-        });
-      }
-    }
-    if (orderItems.length === 0) {
-      res.status(400);
-      throw new Error("No valid items found in the past order for reordering.");
-    }
-  } else {
-    // --- Creating a brand new order ---
-    if (
-      !tableNumber ||
-      !finalCustomerName ||
-      !finalCustomerPhoneNumber ||
-      !items ||
-      items.length === 0
-    ) {
-      res.status(400);
-      throw new Error(
-        "Please provide table number, customer details, and at least one item."
-      );
-    }
-
-    // Validate and prepare order items
-    const orderItems = [];
-    for (const item of items) {
-        const dish = await Dish.findById(item.dish);
-        if (!dish) {
-            res.status(404);
-            throw new Error(`Dish with ID ${item.dish} not found.`);
-        }
-        if (item.quantity <= 0) {
-            res.status(400);
-            throw new Error(`Quantity for dish ${dish.name} must be at least 1.`);
-        }
-        orderItems.push({
-            dish: item.dish,
-            quantity: item.quantity,
-            status: 'pending', // Default status for new items
-            notes: item.notes || '', // Capture notes for the item
-        });
-    }
+  if (
+    !tableNumber ||
+    !customerName ||
+    !customerPhoneNumber ||
+    !items ||
+    items.length === 0
+  ) {
+    res.status(400);
+    throw new Error(
+      "Please provide table number, customer details, and at least one item."
+    );
   }
+
+  // Validate and prepare order items
+  const orderItems = [];
+  let initialTotal = 0;
+
+  for (const item of items) {
+    const dish = await Dish.findById(item.dish);
+    if (!dish) {
+      res.status(404);
+      throw new Error(`Dish with ID ${item.dish} not found.`);
+    }
+    if (item.quantity <= 0) {
+      res.status(400);
+      throw new Error(`Quantity for dish ${dish.name} must be at least 1.`);
+    }
+    orderItems.push({
+      dish: item.dish,
+      quantity: item.quantity,
+      status: "pending", // Default status for new items
+      notes: item.notes || "", // Capture notes for the item
+    });
+    initialTotal += dish.price * item.quantity;
+  }
+
   // 3. Create the order document
   const order = new Order({
     tableNumber,
-    customerName, // --- NEW: Save customerName ---
-    customerPhoneNumber, // --- NEW: Save customerPhoneNumber ---
+    customerName,
+    customerPhoneNumber,
     waiter: req.user._id, // The logged-in waiter
     items: orderItems,
-    totalAmount: initialTotal, // This will be recalculated by pre-save hook
+    totalAmount: initialTotal,
     orderStatus: "pending",
+    timestamps: {
+      // --- NEW: Set initial pending timestamp ---
+      pending: new Date(),
+    },
   });
 
   const createdOrder = await order.save(); // The pre-save hook on Order model will run here
@@ -112,30 +73,17 @@ const createOrder = asyncHandler(async (req, res) => {
     .populate("waiter", "name email");
 
   res.status(201).json(populatedOrder);
-  });
+});
 
-// @desc    Get all orders (with optional filters for history)
+// @desc    Get all orders
 // @route   GET /api/orders
 // @access  Private (Admin/Chef/Waiter)
 const getOrders = asyncHandler(async (req, res) => {
   const { role } = req.user;
-  // NEW: Add customerName and customerPhoneNumber to query destructuring
-  const {
-    status,
-    customerName,
-    customerPhoneNumber,
-    tableNumber,
-    startDate,
-    endDate,
-  } = req.query;
   let query = {};
 
-  // Base filtering by role
   if (role === "chef") {
-    query.orderStatus = {
-      $in: ["pending", "preparing", "ready", "cancellation_requested"],
-    };
-    // Chefs should see items that are active or requested cancellation
+    query.orderStatus = { $in: ["pending", "preparing", "ready"] };
     query["items.status"] = {
       $in: [
         "pending",
@@ -149,41 +97,30 @@ const getOrders = asyncHandler(async (req, res) => {
   } else if (role === "waiter") {
     query.waiter = req.user._id;
   }
-  // Admin sees all orders (no specific query needed for role)
-
-  // NEW: Add filters for order history
-  if (status) {
-    query.orderStatus = status;
-  }
-  if (tableNumber) {
-    query.tableNumber = tableNumber;
-  }
-  if (customerName) {
-    // Case-insensitive partial match for customer name
-    query.customerName = { $regex: customerName, $options: "i" };
-  }
-  if (customerPhoneNumber) {
-    // Exact match for phone number (assuming E.164 format for consistency)
-    query.customerPhoneNumber = customerPhoneNumber;
-  }
-  if (startDate || endDate) {
-    query.createdAt = {};
-    if (startDate) {
-      const start = new Date(startDate);
-      start.setUTCHours(0, 0, 0, 0);
-      query.createdAt.$gte = start;
-    }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setUTCHours(23, 59, 59, 999);
-      query.createdAt.$lte = end;
-    }
-  }
 
   const orders = await Order.find(query)
     .populate("waiter", "name email")
     .populate("items.dish", "name price")
-    .sort({ createdAt: -1 }); // Latest orders first
+    .sort({ createdAt: -1 });
+
+  res.json(orders);
+});
+
+// --- NEW: Get all orders for KDS (Kitchen Display System) ---
+// @desc    Get orders for the KDS (Kitchen Display System)
+// @route   GET /api/orders/kds
+// @access  Private (Chef/Admin)
+const getKDSOrders = asyncHandler(async (req, res) => {
+  // Only show orders that are either pending, preparing, or ready
+  const orders = await Order.find({
+    orderStatus: { $in: ["pending", "preparing", "ready"] },
+  })
+    .populate({
+      path: "items.dish",
+      select: "name price description category preparationTime", // Include prep time for timer logic
+    })
+    .populate("waiter", "name")
+    .sort({ "timestamps.pending": 1 }); // Sort by oldest pending first
 
   res.json(orders);
 });
@@ -201,7 +138,6 @@ const getOrderById = asyncHandler(async (req, res) => {
     throw new Error("Order not found");
   }
 
-  // Authorization check: Waiters can only view their own orders
   if (
     req.user.role === "waiter" &&
     order.waiter.toString() !== req.user._id.toString()
@@ -218,7 +154,7 @@ const getOrderById = asyncHandler(async (req, res) => {
 // @access  Private (Chef)
 const updateOrderItemStatus = asyncHandler(async (req, res) => {
   const { orderId, itemId } = req.params;
-  const { status } = req.body; // Expected status: 'accepted', 'declined', 'preparing', 'ready'
+  const { status } = req.body;
 
   const order = await Order.findById(orderId);
 
@@ -248,9 +184,9 @@ const updateOrderItemStatus = asyncHandler(async (req, res) => {
   }
 
   if (
+    order.isBilled ||
     order.orderStatus === "completed" ||
-    order.orderStatus === "cancelled" ||
-    order.isBilled
+    order.orderStatus === "cancelled"
   ) {
     res.status(400);
     throw new Error(
@@ -268,20 +204,28 @@ const updateOrderItemStatus = asyncHandler(async (req, res) => {
     if (orderItem.status === "pending") {
       allItemsProcessed = false;
     }
-    if (orderItem.status === "accepted") {
+    if (
+      orderItem.status === "accepted" ||
+      orderItem.status === "preparing" ||
+      orderItem.status === "ready"
+    ) {
       anyItemsAccepted = true;
-    }
-    if (orderItem.status === "accepted" && orderItem.status !== "ready") {
-      allItemsReady = false;
+      if (orderItem.status !== "ready") {
+        allItemsReady = false;
+      }
     }
   }
 
+  // --- NEW LOGIC: Update orderStatus and timestamps based on item status changes ---
+  const oldOrderStatus = order.orderStatus;
   if (allItemsProcessed && anyItemsAccepted) {
     order.orderStatus = "preparing";
   }
   if (allItemsReady && anyItemsAccepted) {
     order.orderStatus = "ready";
   }
+
+  // The pre-save hook will handle the timestamp updates, so no need to do it here.
 
   const updatedOrder = await order.save();
 
@@ -332,7 +276,10 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     );
   }
 
+  // --- NEW: Capture old status for pre-save hook trigger ---
+  const oldOrderStatus = order.orderStatus;
   order.orderStatus = status;
+
   const updatedOrder = await order.save();
 
   res.json(updatedOrder);
@@ -364,6 +311,8 @@ const cancelOrder = asyncHandler(async (req, res) => {
     throw new Error("Not authorized to cancel this order.");
   }
 
+  // --- NEW: Capture old status for pre-save hook trigger ---
+  const oldOrderStatus = order.orderStatus;
   order.orderStatus = "cancelled";
   order.items.forEach((item) => {
     if (item.status !== "declined") {
@@ -464,33 +413,26 @@ const manageItemCancellation = asyncHandler(async (req, res) => {
     item.status = "cancelled";
     const adminUser = await User.findById(req.user._id).select("name");
     const adminName = adminUser ? adminUser.name : "Admin";
-
-        // Send WhatsApp notification for approved cancellation
-        const messageBody = `Hello ${order.customerName}!\n\n` +
-                            `Your request to cancel "${dishName}" (Quantity: ${item.quantity}) from your order for Table ${order.tableNumber} ` +
-                            `has been *APPROVED* by ${adminName}.\n\n` +
-                            `Your order total will be adjusted accordingly.`;
-        await sendWhatsAppMessage(customerPhoneNumber, messageBody);
-
-    } else if (action === 'reject') {
-        // Revert to 'accepted' or 'preparing' based on original status before request.
-        // For simplicity, let's revert to 'accepted' if it was accepted, otherwise to 'pending'.
-        // A more robust system might store the 'previousStatus' when 'cancellation_requested' is set.
-        item.status = 'accepted'; // Assume it was accepted before request
-        const adminUser = await User.findById(req.user._id).select('name');
-        const adminName = adminUser ? adminUser.name : 'Admin';
-
-        // Send WhatsApp notification for rejected cancellation
-        const messageBody = `Hello ${order.customerName}!\n\n` +
-                            `Your request to cancel "${dishName}" (Quantity: ${item.quantity}) from your order for Table ${order.tableNumber} ` +
-                            `has been *REJECTED* by ${adminName}.\n\n` +
-                            `The item will remain part of your order. Please contact staff for further assistance.`;
-        await sendWhatsAppMessage(customerPhoneNumber, messageBody);
-
-    } else {
-        res.status(400);
-        throw new Error('Invalid action. Must be "approve" or "reject".');
-    }
+    const messageBody =
+      `Hello ${order.customerName}!\n\n` +
+      `Your request to cancel "${dishName}" (Quantity: ${item.quantity}) from your order for Table ${order.tableNumber} ` +
+      `has been *APPROVED* by ${adminName}.\n\n` +
+      `Your order total will be adjusted accordingly.`;
+    await sendWhatsAppMessage(customerPhoneNumber, messageBody);
+  } else if (action === "reject") {
+    item.status = "accepted";
+    const adminUser = await User.findById(req.user._id).select("name");
+    const adminName = adminUser ? adminUser.name : "Admin";
+    const messageBody =
+      `Hello ${order.customerName}!\n\n` +
+      `Your request to cancel "${dishName}" (Quantity: ${item.quantity}) from your order for Table ${order.tableNumber} ` +
+      `has been *REJECTED* by ${adminName}.\n\n` +
+      `The item will remain part of your order. Please contact staff for further assistance.`;
+    await sendWhatsAppMessage(customerPhoneNumber, messageBody);
+  } else {
+    res.status(400);
+    throw new Error('Invalid action. Must be "approve" or "reject".');
+  }
 
   const updatedOrder = await order.save();
 
@@ -501,13 +443,78 @@ const manageItemCancellation = asyncHandler(async (req, res) => {
   res.json(populatedOrder);
 });
 
+// @desc    Admin modifies an existing order item (dish and/or quantity)
+// @route   PUT /api/orders/:orderId/item/:itemId/modify
+// @access  Private/Admin
+const modifyOrderItem = asyncHandler(async (req, res) => {
+  const { orderId, itemId } = req.params;
+  const { dish: newDishId, quantity: newQuantity } = req.body;
+
+  const order = await Order.findById(orderId);
+
+  if (!order) {
+    res.status(404);
+    throw new Error("Order not found");
+  }
+
+  if (
+    order.isBilled ||
+    order.orderStatus === "completed" ||
+    order.orderStatus === "cancelled"
+  ) {
+    res.status(400);
+    throw new Error(
+      `Cannot modify order items for an order that is ${order.orderStatus} or already billed.`
+    );
+  }
+
+  const itemToModify = order.items.id(itemId);
+
+  if (!itemToModify) {
+    res.status(404);
+    throw new Error("Order item not found in this order");
+  }
+
+  if (newQuantity !== undefined) {
+    if (typeof newQuantity !== "number" || newQuantity <= 0) {
+      res.status(400);
+      throw new Error("New quantity must be a positive number.");
+    }
+    itemToModify.quantity = newQuantity;
+  }
+
+  if (newDishId !== undefined) {
+    const newDish = await Dish.findById(newDishId);
+    if (!newDish) {
+      res.status(404);
+      throw new Error(`New dish with ID ${newDishId} not found.`);
+    }
+    if (!newDish.isAvailable) {
+      res.status(400);
+      throw new Error(`New dish "${newDish.name}" is currently not available.`);
+    }
+    itemToModify.dish = newDish._id;
+    itemToModify.status = "pending";
+  }
+
+  const updatedOrder = await order.save();
+
+  const populatedOrder = await Order.findById(updatedOrder._id)
+    .populate({
+      path: "items.dish",
+      select: "name price description category",
+    })
+    .populate("waiter", "name email");
+
+  res.json(populatedOrder);
+});
 
 module.exports = {
   createOrder,
   getOrders,
+  getKDSOrders, // --- NEW: Export the new KDS function ---
   getOrderById,
   updateOrderItemStatus,
   updateOrderStatus,
   cancelOrder,
-  requestItemCancellation,
 };
