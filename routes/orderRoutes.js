@@ -1,4 +1,3 @@
-<<<<<<< Updated upstream
 // routes/orderRoutes.js
 const express = require("express");
 const router = express.Router();
@@ -69,5 +68,3 @@ router.put(
 );
 
 module.exports = router;
-=======
->>>>>>> Stashed changes
