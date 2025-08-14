@@ -1,13 +1,12 @@
 // controllers/orderController.js
 const asyncHandler = require('express-async-handler');
 const Order = require('../models/Order');
-const Dish = require('../models/Dish'); // To get dish price
+const Dish = require('../models/Dish');
 
 // @desc    Create a new order
 // @route   POST /api/orders
 // @access  Private/Waiter
 const createOrder = asyncHandler(async (req, res) => {
-    // --- UPDATED: Destructure tableNumber, customerName, customerPhoneNumber ---
     const { items, tableNumber, customerName, customerPhoneNumber } = req.body;
 
     // 1. Basic input validation
@@ -19,7 +18,6 @@ const createOrder = asyncHandler(async (req, res) => {
         res.status(400);
         throw new Error('No order items provided.');
     }
-    // --- NEW VALIDATION: customerName and customerPhoneNumber ---
     if (!customerName) {
         res.status(400);
         throw new Error('Customer name is required for the order.');
@@ -28,12 +26,13 @@ const createOrder = asyncHandler(async (req, res) => {
         res.status(400);
         throw new Error('Customer phone number is required.');
     }
-    // Note: Mongoose schema handles specific format validation for customerPhoneNumber.
 
     const orderItems = [];
     let initialTotal = 0;
+    const today = new Date();
 
-    // 2. Validate each item and fetch dish details
+    // 2. Validate each item and create a dish "snapshot"
+    // This is the core logic that captures the dish details at the time of the order.
     for (const item of items) {
         if (!item.dish || !item.quantity) {
             res.status(400);
@@ -49,33 +48,51 @@ const createOrder = asyncHandler(async (req, res) => {
             res.status(404);
             throw new Error(`Dish not found or unavailable: ${item.dish}`);
         }
+
+        // Determine the price to use: special price if applicable, otherwise the regular price.
+        let priceToUse = dish.price;
+        if (
+            dish.isSpecial &&
+            dish.specialPrice !== undefined &&
+            dish.specialStartDate &&
+            dish.specialEndDate
+        ) {
+            const specialStart = new Date(dish.specialStartDate);
+            const specialEnd = new Date(dish.specialEndDate);
+
+            if (today >= specialStart && today <= specialEnd) {
+                priceToUse = dish.specialPrice;
+            }
+        }
+
+        // Create a new order item with the dish snapshot. This is the new, self-contained item.
         orderItems.push({
             dish: dish._id,
+            name: dish.name,
+            description: dish.description,
+            category: dish.category,
+            price: priceToUse, // Store the final price (special or regular)
             quantity: item.quantity,
-            status: 'pending' // Default status for new items
+            status: 'pending'
         });
-        initialTotal += dish.price * item.quantity;
+        initialTotal += priceToUse * item.quantity;
     }
 
-    // 3. Create the order document
+    // 3. Create the order document with the correct initial total
     const order = new Order({
         tableNumber,
-        customerName,        // --- NEW: Save customerName ---
-        customerPhoneNumber, // --- NEW: Save customerPhoneNumber ---
-        waiter: req.user._id, // The logged-in waiter
+        customerName,
+        customerPhoneNumber,
+        waiter: req.user._id,
         items: orderItems,
-        totalAmount: initialTotal, // This will be recalculated by pre-save hook
+        totalAmount: initialTotal,
         orderStatus: 'pending'
     });
 
-    const createdOrder = await order.save(); // The pre-save hook on Order model will run here
+    const createdOrder = await order.save();
 
-    // 4. Respond with the created order, populating dish details for the client
+    // 4. The populated data is already in the document, so we only need to populate the waiter.
     const populatedOrder = await Order.findById(createdOrder._id)
-                                    .populate({
-                                        path: 'items.dish',
-                                        select: 'name price description category'
-                                    })
                                     .populate('waiter', 'name email');
 
     res.status(201).json(populatedOrder);
@@ -93,13 +110,12 @@ const getOrders = asyncHandler(async (req, res) => {
     }
     // Filter by orderStatus for chef
     if (req.user.role === 'chef') {
-        // Chef usually needs 'pending' or 'preparing' orders
         query.orderStatus = { $in: ['pending', 'preparing'] };
     }
 
+    // We no longer need to populate 'items.dish' because the data is now a snapshot.
     const orders = await Order.find(query)
-        .populate('waiter', 'name email')
-        .populate('items.dish', 'name price');
+        .populate('waiter', 'name email');
     res.json(orders);
 });
 
@@ -107,12 +123,11 @@ const getOrders = asyncHandler(async (req, res) => {
 // @route   GET /api/orders/:id
 // @access  Private/Admin, Chef, Waiter (if it's their order)
 const getOrderById = asyncHandler(async (req, res) => {
+    // We no longer need to populate 'items.dish' here either.
     const order = await Order.findById(req.params.id)
-        .populate('waiter', 'name email')
-        .populate('items.dish', 'name price');
+        .populate('waiter', 'name email');
 
     if (order) {
-        // Ensure only relevant users can view
         if (req.user.role === 'waiter' && order.waiter.toString() !== req.user._id.toString()) {
             res.status(403);
             throw new Error('Not authorized to view this order');
@@ -129,12 +144,12 @@ const getOrderById = asyncHandler(async (req, res) => {
 // @access  Private/Chef
 const updateOrderItemStatus = asyncHandler(async (req, res) => {
     const { orderId, itemId } = req.params;
-    const { status } = req.body; // 'accepted' or 'declined'
+    const { status } = req.body;
 
     const order = await Order.findById(orderId);
 
     if (order) {
-        const item = order.items.id(itemId); // Mongoose subdocument .id()
+        const item = order.items.id(itemId);
         if (item) {
             if (!['accepted', 'declined'].includes(status)) {
                 res.status(400);
@@ -142,10 +157,9 @@ const updateOrderItemStatus = asyncHandler(async (req, res) => {
             }
             item.status = status;
 
-            // Optionally, update overall order status if all items are processed
             const allItemsProcessed = order.items.every(i => i.status !== 'pending');
             if (allItemsProcessed && order.orderStatus === 'pending') {
-                order.orderStatus = 'preparing'; // Or 'ready' if all accepted immediately
+                order.orderStatus = 'preparing';
             }
 
             await order.save();
@@ -164,7 +178,7 @@ const updateOrderItemStatus = asyncHandler(async (req, res) => {
 // @route   PUT /api/orders/:id/status
 // @access  Private/Chef
 const updateOrderStatus = asyncHandler(async (req, res) => {
-    const { status } = req.body; // e.g., 'preparing', 'ready', 'completed' (admin might do this)
+    const { status } = req.body;
 
     const order = await Order.findById(req.params.id);
 
@@ -175,10 +189,8 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
         }
         order.orderStatus = status;
 
-        // If order is completed, mark it as ready for billing if not already
         if (status === 'completed' && !order.isBilled) {
-            // Logic to trigger bill generation or prepare for it
-            // This will be handled more robustly in billController
+            // This is where you would traditionally signal to generate a bill
         }
 
         const updatedOrder = await order.save();

@@ -1,7 +1,8 @@
+// controllers/dishController.js
 const asyncHandler = require('express-async-handler');
 const Dish = require('../models/Dish');
 const path = require('path');
-const fs = require('fs').promises; // Use the promise-based fs module for non-blocking I/O
+const fs = require('fs').promises;
 
 /**
  * @desc    Create a new dish
@@ -9,13 +10,12 @@ const fs = require('fs').promises; // Use the promise-based fs module for non-bl
  * @access  Private (Admin/Chef)
  */
 const createDish = asyncHandler(async (req, res) => {
-    // Destructure dietaryRestrictions 
-    const { 
-        name, 
-        description, 
-        price, 
-        category, 
-        isAvailable, 
+    const {
+        name,
+        description,
+        price,
+        category,
+        isAvailable,
         dietaryRestrictions,
         isSpecial,
         specialPrice,
@@ -26,7 +26,6 @@ const createDish = asyncHandler(async (req, res) => {
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : '';
     const parsedPrice = parseFloat(price);
 
-    // Use a helper function for file deletion to avoid repetition
     const deleteUploadedFile = async (filePath) => {
         if (filePath) {
             try {
@@ -56,13 +55,11 @@ const createDish = asyncHandler(async (req, res) => {
         throw new Error(`Dish with name "${name}" already exists.`);
     }
 
-    // Validate dietaryRestrictions if provided 
     if (dietaryRestrictions && !Array.isArray(dietaryRestrictions)) {
         res.status(400);
         throw new Error('Dietary restrictions must be an array.');
     }
 
-    const specialPriceValue = isSpecial ? parseFloat(specialPrice) : undefined;
     const dish = await Dish.create({
         name,
         description,
@@ -70,13 +67,11 @@ const createDish = asyncHandler(async (req, res) => {
         category,
         isAvailable,
         imageUrl,
-        dietaryRestrictions: dietaryRestrictions || [], 
-        isSpecial,
-        specialPrice: isSpecial ? specialPriceValue : undefined,
-        specialDateRange: {
-            start: isSpecial ? specialStartDate : undefined,
-            end: isSpecial ? specialEndDate : undefined,
-        }
+        dietaryRestrictions: dietaryRestrictions || [],
+        isSpecial: isSpecial || false,
+        specialPrice: isSpecial ? parseFloat(specialPrice) : undefined,
+        specialStartDate: isSpecial ? specialStartDate : undefined,
+        specialEndDate: isSpecial ? specialEndDate : undefined,
     });
 
     res.status(201).json(dish);
@@ -85,7 +80,7 @@ const createDish = asyncHandler(async (req, res) => {
 /**
  * @desc    Get all dishes
  * @route   GET /api/dishes
- * @access  Public (Anyone can view menu) - or Private if only for staff
+ * @access  Public (Anyone can view menu)/Private if only for staff
  */
 const getDishes = asyncHandler(async (req, res) => {
     const dishes = await Dish.find({});
@@ -114,13 +109,12 @@ const getDishById = asyncHandler(async (req, res) => {
  * @access  Private (Admin/Chef)
  */
 const updateDish = asyncHandler(async (req, res) => {
-    // Destructure dietaryRestrictions 
-    const { 
-        name, 
-        description, 
-        price, 
-        category, 
-        isAvailable, 
+    const {
+        name,
+        description,
+        price,
+        category,
+        isAvailable,
         dietaryRestrictions,
         isSpecial,
         specialPrice,
@@ -131,7 +125,6 @@ const updateDish = asyncHandler(async (req, res) => {
 
     const dish = await Dish.findById(req.params.id);
 
-    // Use a helper function for file deletion to avoid repetition
     const deleteUploadedFile = async (filePath) => {
         if (filePath) {
             try {
@@ -154,14 +147,16 @@ const updateDish = asyncHandler(async (req, res) => {
         dish.category = category !== undefined ? category : dish.category;
         dish.isAvailable = isAvailable !== undefined ? isAvailable : dish.isAvailable;
         dish.imageUrl = newImageUrl;
-        dish.isSpecial = isSpecial !== undefined ? isSpecial : dish.isSpecial;
-        
-        if (isSpecial !== undefined) {
-             dish.specialPrice = isSpecial ? parseFloat(specialPrice) : undefined;
-             dish.specialDateRange.start = isSpecial ? specialStartDate : undefined;
-             dish.specialDateRange.end = isSpecial ? specialEndDate : undefined;
-        }
 
+        if (isSpecial !== undefined) {
+             dish.isSpecial = isSpecial;
+             dish.specialPrice = isSpecial ? parseFloat(specialPrice) : undefined;
+             dish.specialStartDate = isSpecial ? specialStartDate : undefined;
+             dish.specialEndDate = isSpecial ? specialEndDate : undefined;
+        } else {
+             // If isSpecial is not provided in the request body, keep the existing value
+             // and don't modify the price/dates.
+        }
 
         if (dietaryRestrictions !== undefined) {
              if (!Array.isArray(dietaryRestrictions)) {
@@ -224,7 +219,6 @@ const toggleDishAvailability = asyncHandler(async (req, res) => {
     const dish = await Dish.findById(req.params.id);
 
     if (dish) {
-        // Toggle the current status
         dish.isAvailable = !dish.isAvailable;
         const updatedDish = await dish.save();
         res.json({
@@ -257,13 +251,14 @@ const toggleDishSpecial = asyncHandler(async (req, res) => {
                 throw new Error('Special price, start date, and end date are required to make a dish special.');
             }
             dish.specialPrice = parseFloat(specialPrice);
-            dish.specialDateRange.start = specialStartDate;
-            dish.specialDateRange.end = specialEndDate;
+            dish.specialStartDate = specialStartDate;
+            dish.specialEndDate = specialEndDate;
         } else {
             dish.specialPrice = undefined;
-            dish.specialDateRange.start = undefined;
-            dish.specialDateRange.end = undefined;
+            dish.specialStartDate = undefined;
+            dish.specialEndDate = undefined;
         }
+
         const updatedDish = await dish.save();
         res.json({
             _id: updatedDish._id,

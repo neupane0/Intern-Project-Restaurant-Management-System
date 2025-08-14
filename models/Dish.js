@@ -1,15 +1,13 @@
 // models/Dish.js
 const mongoose = require('mongoose');
 
-    
-
 const dishSchema = mongoose.Schema(
     {
         name: {
             type: String,
             required: true,
+            unique: true,
             trim: true,
-            unique: true, 
         },
         description: {
             type: String,
@@ -18,25 +16,27 @@ const dishSchema = mongoose.Schema(
         },
         price: {
             type: Number,
-            required: true,
+            required: true, 
             min: 0,
         },
         category: {
             type: String,
-            required: true,
-            trim: true,
+            required: true, 
         },
         isAvailable: {
             type: Boolean,
             default: true,
         },
-        //  Dietary Restrictions 
-        dietaryRestrictions: {
-            type: [String], 
-            default: [],    
-            enum: ['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'halal', 'kosher'], 
+        imageUrl: {
+            type: String,
+            default: '',
         },
-        //Promotion fields
+        dietaryRestrictions: {
+            type: [String],
+            default: [],
+            enum: ['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'halal', 'kosher'],
+        },
+        
         isSpecial: {
             type: Boolean,
             default: false,
@@ -44,15 +44,18 @@ const dishSchema = mongoose.Schema(
         specialPrice: {
             type: Number,
             min: 0,
+            required: function() { return this.isSpecial; },
         },
-        specialDateRange: {
-            start: {
-                type: Date,
-            },
-            end: {
-                type: Date,
-            },
+        
+        specialStartDate: {
+            type: Date,
+            required: function() { return this.isSpecial; },
         },
+        specialEndDate: {
+            type: Date,
+            required: function() { return this.isSpecial; },
+        },
+        
     },
     {
         timestamps: true,

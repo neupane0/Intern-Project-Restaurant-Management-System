@@ -23,7 +23,8 @@
     "multer": "^2.0.1",
     "nodemailer": "^7.0.4",
     "path": "^0.12.7",
-    "twilio": "^5.7.1"
+    "twilio": "^5.7.1",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
